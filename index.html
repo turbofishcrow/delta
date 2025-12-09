@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <script src="index.js" defer></script>
+    <div class="normal">
+      <h1>Delta-rational chord explorer</h1>
+      <hr />
+      Made by inthar
+      <hr />
+      <table>
+        <tr>
+          <td>
+            <label for="input-base-frequency"
+              >Base frequency (in Hz, default 220):</label
+            >
+            <input
+              type="number"
+              id="input-base-frequency"
+              name="input-base-frequency"
+              value="220"
+              style="width: 80px"
+            />
+            <button id="btn-set-base-frequency">Update</button>
+          </td>
+        </tr>
+      </table>
+      <hr />
+      <div id="audio-controls">
+        <strong>Playback:</strong>
+        <button id="btn-play-chord">▶ Play</button>
+        <button id="btn-stop-chord">⏹ Stop</button>
+        &nbsp;&nbsp;
+        <strong>Waveform:</strong>
+        <button id="btn-waveform-sine" class="waveform-btn active">Sine</button>
+        <button id="btn-waveform-triangle" class="waveform-btn">Triangle</button>
+        <button id="btn-waveform-semisine" class="waveform-btn">Semisine</button>
+      </div>
+      <hr />
+      <div id="error-display">
+        <strong>Least-squares linear error:</strong>
+        <span id="ls-error">—</span>
+        <button id="btn-calculate-error">Calculate</button>
+      </div>
+      <hr />
+      <button id="btn-add-interval">Add upper interval</button>
+      <button id="btn-remove-interval">Remove upper interval</button>
+      <hr />
+      <table id="intervals">
+        <tr>
+          <td>
+            <input
+              type="number"
+              id="input-interval-1-cents"
+              name="input-interval-1-cents"
+              style="width: 80px"
+            />
+            Interval (in cents, from root)
+            <button id="btn-update-cents-1">Update (keeping deltas)</button>
+            <br/>
+            <input
+              type="text"
+              id="input-interval-1-ratio"
+              name="input-interval-1-ratio"
+              value="5/4"
+              style="width: 80px"
+            />
+            Ratio (from root)
+            <button id="btn-update-ratio-1">Update (keeping deltas)</button>
+            <br/>
+            <input
+              type="number"
+              id="input-interval-1-delta"
+              name="input-interval-1-delta"
+              value="1"
+              style="width: 80px"
+            />
+            Relative delta
+            <button id="btn-update-delta-1">Update (keeping other deltas)</button>
+            <br/>
+            <input
+              type="number"
+              id="input-interval-1-target-delta"
+              name="input-interval-1-target-delta"
+              value="1"
+              style="width: 80px"
+            />
+            Target delta
+            <br/>
+          </td>
+          <td>
+          </td>
+        </tr>
+      </table>
+    </div>
+  </body>
+</html>
