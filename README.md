@@ -19,9 +19,7 @@ For example, a chord with delta signature `+1+1` means the frequency difference 
   - **Frequency ratio** (from root, e.g., `5/4` or `1.25`)
   - **Relative delta** (frequency difference relative to the first interval's delta)
 
-### Smart Interval Updates
-
-When you update an interval, the system intelligently preserves relationships:
+### Interval Updates
 
 - **Update from cents/ratio (keep deltas)**: The changed interval updates, and all other intervals shift to maintain their delta values
 - **Update from delta (keep other deltas)**: The changed interval recalculates its cents/ratio, and other intervals shift while keeping their deltas fixed
