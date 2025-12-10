@@ -614,7 +614,8 @@ btnAddInterval.addEventListener("click", () => {
             />
             Delta
             <button id="btn-update-delta-${currentIntervalCount}">Update (keep other deltas)</button>
-            <br/>
+          </td>
+          <td>
             <input
               type="number"
               id="input-interval-${currentIntervalCount}-target-delta"
@@ -623,13 +624,13 @@ btnAddInterval.addEventListener("click", () => {
               style="width: 80px"
             />
             Target delta
+            <br/>
             <input
               type="checkbox"
               id="input-interval-${currentIntervalCount}-free"
               name="input-interval-${currentIntervalCount}-free"
             />
             Free (+?)
-            <br/>
           </td>
           `
       );

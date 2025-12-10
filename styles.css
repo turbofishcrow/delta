@@ -530,3 +530,12 @@ svg {
   opacity: 1;
   box-shadow: 0 0 0 2px var(--c4);
 }
+
+/* Intervals table alternating shading */
+#intervals tr:nth-child(even) {
+  background-color: rgb(20%, 10%, 30%);
+}
+
+#intervals tr:nth-child(odd) {
+  background-color: rgb(10%, 5%, 20%);
+}
