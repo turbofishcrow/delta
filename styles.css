@@ -1,5 +1,5 @@
 /* Basic.css  */
-
+/*
 @font-face {
   font-family: "Open Sans";
   font-style: normal;
@@ -25,6 +25,7 @@
     U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
     U+FFFD;
 }
+*/
 
 * {
   box-sizing: border-box;
@@ -69,7 +70,7 @@ body {
   padding: 0;
   padding-top: 16px;
   padding-bottom: 32px;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-weight: 400;
   font-style: normal;
   text-rendering: optimizeLegibility;
@@ -91,7 +92,7 @@ pre[class*="language-"] {
   overflow: auto;
   background-color: #2f005e;
   color: chartreuse;
-  font-family: var(--mono);
+  font-family: var(--sans);
   font-size: 14px;
 
   /* make space  */
@@ -323,7 +324,7 @@ input[type="button"] {
   padding: 0.6em;
   cursor: pointer;
   text-align: center;
-  font: 1em var(--mono);
+  font: 1em var(--sans);
 }
 
 button:hover,
