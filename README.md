@@ -2,6 +2,8 @@
 
 A web-based tool for exploring and analyzing [delta-rational chords](https://en.xen.wiki/w/Delta-rational_chord) — chords where the frequency differences (deltas) between successive notes have simple integer ratios.
 
+![Front page screenshot](https://raw.githubusercontent.com/inthar-raven/delta/main/static/images/front.png)
+
 ## What are Delta-Rational Chords?
 
 A delta-rational (DR) chord is a chord where some pairs of frequency differences between successive notes have integer ratios. Unlike traditional just intonation (JI) chords, DR chords don't require integer ratios between the frequencies themselves — only between the frequency *differences*.
