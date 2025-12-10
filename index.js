@@ -183,7 +183,11 @@ function centsToRatio(cents) {
 }
 
 function getBaseFrequency() {
-  return parseFloat(document.getElementById("input-base-frequency").value) || DEFAULT_PITCH_STANDARD;
+  const freq = parseFloat(document.getElementById("input-base-frequency").value);
+  if (isNaN(freq) || freq <= 0) {
+    return DEFAULT_PITCH_STANDARD;
+  }
+  return freq;
 }
 
 // Calculate the cumulative frequency for interval i (1-indexed)
@@ -214,7 +218,10 @@ function updateFromCents(intervalIndex) {
   const ratioInput = document.getElementById(`input-interval-${intervalIndex}-ratio`);
   
   const cents = parseCents(centsInput.value);
-  if (isNaN(cents)) return;
+  if (isNaN(cents) || cents <= 0) {
+    alert("Cents must be a positive number.");
+    return;
+  }
   
   // Update the input to show the computed cents value (in case EDO notation was used)
   centsInput.value = cents.toFixed(3);
@@ -232,7 +239,10 @@ function updateFromRatio(intervalIndex) {
   const ratioInput = document.getElementById(`input-interval-${intervalIndex}-ratio`);
   
   const cents = ratioToCents(ratioInput.value);
-  if (isNaN(cents)) return;
+  if (isNaN(cents) || cents <= 0) {
+    alert("Ratio must be greater than 1.");
+    return;
+  }
   
   // Update cents
   centsInput.value = cents.toFixed(3);
@@ -288,6 +298,14 @@ function updateFromDelta(intervalIndex) {
   // When delta is updated, we need to recalculate the cents/ratio for this interval
   // and all intervals above it, keeping intervals below fixed.
   // The unit delta is determined from the previous delta signature.
+  
+  // Validate delta is positive
+  const deltaInput = document.getElementById(`input-interval-${intervalIndex}-delta`);
+  const deltaValue = parseFloat(deltaInput.value);
+  if (isNaN(deltaValue) || deltaValue <= 0) {
+    alert("Delta must be a positive number.");
+    return;
+  }
   
   const baseFreq = getBaseFrequency();
   
@@ -413,6 +431,18 @@ function updateDeltaDisplay(intervalIndex, firstDelta) {
 
 // Recalculate ratios and deltas from current cents values
 function recalcFromCents() {
+  // Validate all cents values first
+  for (let i = 1; i <= currentIntervalCount; i++) {
+    const centsInput = document.getElementById(`input-interval-${i}-cents`);
+    if (!centsInput) continue;
+    
+    const cents = parseCents(centsInput.value);
+    if (isNaN(cents) || cents <= 0) {
+      alert(`Interval ${i}: Cents must be a positive number.`);
+      return;
+    }
+  }
+  
   // Sync all ratios from cents
   for (let i = 1; i <= currentIntervalCount; i++) {
     const centsInput = document.getElementById(`input-interval-${i}-cents`);
@@ -437,6 +467,18 @@ function recalcFromCents() {
 
 // Recalculate cents and deltas from current ratio values
 function recalcFromRatios() {
+  // Validate all ratio values first
+  for (let i = 1; i <= currentIntervalCount; i++) {
+    const ratioInput = document.getElementById(`input-interval-${i}-ratio`);
+    if (!ratioInput) continue;
+    
+    const cents = ratioToCents(ratioInput.value);
+    if (isNaN(cents) || cents <= 0) {
+      alert(`Interval ${i}: Ratio must be greater than 1.`);
+      return;
+    }
+  }
+  
   // Sync all cents from ratios
   for (let i = 1; i <= currentIntervalCount; i++) {
     const centsInput = document.getElementById(`input-interval-${i}-cents`);
