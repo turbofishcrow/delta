@@ -75,7 +75,7 @@ function getChordFrequencies() {
   for (let i = 1; i <= currentIntervalCount; i++) {
     const centsInput = document.getElementById(`input-interval-${i}-cents`);
     if (centsInput) {
-      const cents = parseFloat(centsInput.value);
+      const cents = parseCents(centsInput.value);
       if (!isNaN(cents)) {
         const freq = baseFreq * Math.pow(2, cents / 1200);
         frequencies.push(freq);
@@ -137,6 +137,34 @@ function setWaveform(waveform) {
 
 // ============ Interval Conversion Utilities ============
 
+/**
+ * Parse a cents value from various formats:
+ * - Plain number: "386.31" -> 386.31
+ * - EDO notation: "5\12" -> 5 steps of 12-EDO = 500 cents
+ * - EDO notation: "7\31" -> 7 steps of 31-EDO
+ */
+function parseCents(input) {
+  if (typeof input !== "string") {
+    return parseFloat(input);
+  }
+  
+  // Check for EDO notation: x\n (x steps of n-EDO)
+  if (input.includes("\\")) {
+    const parts = input.split("\\");
+    if (parts.length === 2) {
+      const steps = parseFloat(parts[0]);
+      const edo = parseFloat(parts[1]);
+      if (!isNaN(steps) && !isNaN(edo) && edo > 0) {
+        return (1200 * steps) / edo;
+      }
+    }
+    return NaN;
+  }
+  
+  // Plain number
+  return parseFloat(input);
+}
+
 function ratioToCents(ratio) {
   // Parse ratio string like "5/4" or decimal like "1.25"
   let value;
@@ -163,7 +191,7 @@ function getFrequencyForInterval(intervalIndex) {
   const baseFreq = getBaseFrequency();
   const centsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
   if (centsInput) {
-    const cents = parseFloat(centsInput.value);
+    const cents = parseCents(centsInput.value);
     if (!isNaN(cents)) {
       return baseFreq * Math.pow(2, cents / 1200);
     }
@@ -185,8 +213,11 @@ function updateFromCents(intervalIndex) {
   const centsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
   const ratioInput = document.getElementById(`input-interval-${intervalIndex}-ratio`);
   
-  const cents = parseFloat(centsInput.value);
+  const cents = parseCents(centsInput.value);
   if (isNaN(cents)) return;
+  
+  // Update the input to show the computed cents value (in case EDO notation was used)
+  centsInput.value = cents.toFixed(3);
   
   // Update ratio
   const ratio = centsToRatio(cents);
@@ -216,7 +247,7 @@ function recalculateIntervalsOtherThan(intervalIndex) {
   
   // Get the first interval's frequency difference (reference delta)
   const firstCentsInput = document.getElementById("input-interval-1-cents");
-  const firstCents = parseFloat(firstCentsInput.value);
+  const firstCents = parseCents(firstCentsInput.value);
   if (isNaN(firstCents)) return;
   
   const firstFreq = baseFreq * centsToRatio(firstCents);
@@ -272,9 +303,9 @@ function updateFromDelta(intervalIndex) {
     const secondDeltaInput = document.getElementById("input-interval-2-delta");
     const firstCentsInput = document.getElementById("input-interval-1-cents");
     
-    const secondCents = parseFloat(secondCentsInput.value);
+    const secondCents = parseCents(secondCentsInput.value);
     const secondRelativeDelta = parseFloat(secondDeltaInput.value);
-    const firstCents = parseFloat(firstCentsInput.value);
+    const firstCents = parseCents(firstCentsInput.value);
     
     if (isNaN(secondCents) || isNaN(secondRelativeDelta) || isNaN(firstCents) || secondRelativeDelta <= 0) return;
     
@@ -288,7 +319,7 @@ function updateFromDelta(intervalIndex) {
     // In this case, the delta value acts as a direct scaling factor
     const firstCentsInput = document.getElementById("input-interval-1-cents");
     const firstDeltaInput = document.getElementById("input-interval-1-delta");
-    const firstCents = parseFloat(firstCentsInput.value);
+    const firstCents = parseCents(firstCentsInput.value);
     const newFirstDelta = parseFloat(firstDeltaInput.value);
     
     if (isNaN(firstCents) || isNaN(newFirstDelta) || newFirstDelta <= 0) return;
@@ -302,7 +333,7 @@ function updateFromDelta(intervalIndex) {
     // For intervals other than the first, use the first interval to determine unit delta
     const firstCentsInput = document.getElementById("input-interval-1-cents");
     const firstDeltaInput = document.getElementById("input-interval-1-delta");
-    const firstCents = parseFloat(firstCentsInput.value);
+    const firstCents = parseCents(firstCentsInput.value);
     const firstRelativeDelta = parseFloat(firstDeltaInput.value) || 1;
     
     if (isNaN(firstCents)) return;
@@ -342,7 +373,7 @@ function updateAllDeltas() {
   
   // Get the first interval's frequency difference (reference delta)
   const firstCentsInput = document.getElementById("input-interval-1-cents");
-  const firstCents = parseFloat(firstCentsInput.value);
+  const firstCents = parseCents(firstCentsInput.value);
   if (isNaN(firstCents)) return;
   
   const firstFreq = baseFreq * centsToRatio(firstCents);
@@ -369,7 +400,7 @@ function updateDeltaDisplay(intervalIndex, firstDelta) {
   
   if (!centsInput || !deltaInput) return;
   
-  const cents = parseFloat(centsInput.value);
+  const cents = parseCents(centsInput.value);
   if (isNaN(cents)) return;
   
   const currentFreq = baseFreq * centsToRatio(cents);
@@ -389,8 +420,11 @@ function recalcFromCents() {
     
     if (!centsInput || !ratioInput) continue;
     
-    const cents = parseFloat(centsInput.value);
+    const cents = parseCents(centsInput.value);
     if (isNaN(cents)) continue;
+    
+    // Update the input to show the computed cents value (in case EDO notation was used)
+    centsInput.value = cents.toFixed(3);
     
     // Update ratio to match cents
     const ratio = centsToRatio(cents);
@@ -427,7 +461,7 @@ function updateAllFromDeltas() {
   
   // Get the first interval's frequency difference (this is our reference delta = 1)
   const firstCentsInput = document.getElementById("input-interval-1-cents");
-  const firstCents = parseFloat(firstCentsInput.value);
+  const firstCents = parseCents(firstCentsInput.value);
   if (isNaN(firstCents)) return;
   
   const firstFreq = baseFreq * centsToRatio(firstCents);
@@ -492,12 +526,12 @@ btnAddInterval.addEventListener("click", () => {
   newRow.innerHTML = (`
           <td>
             <input
-              type="number"
+              type="text"
               id="input-interval-${currentIntervalCount}-cents"
               name="input-interval-${currentIntervalCount}-cents"
               style="width: 80px"
             />
-            Interval (in cents, from root)
+            Interval (cents or a\\n, from root)
             <button id="btn-update-cents-${currentIntervalCount}">Update (keep deltas)</button>
             <br/>
             <input
@@ -588,7 +622,7 @@ function calculateLeastSquaresErrorForFDR() {
     
     if (!centsInput || !targetDeltaInput) continue;
     
-    const cents = parseFloat(centsInput.value);
+    const cents = parseCents(centsInput.value);
     const targetDelta = parseFloat(targetDeltaInput.value);
     
     if (isNaN(cents) || isNaN(targetDelta)) continue;
@@ -673,7 +707,7 @@ function calculatePDRError() {
     
     if (!centsInput || !targetDeltaInput) continue;
     
-    const cents = parseFloat(centsInput.value);
+    const cents = parseCents(centsInput.value);
     const targetDelta = parseFloat(targetDeltaInput.value);
     const checkboxFree = freeCheckbox ? freeCheckbox.checked : false;
     
