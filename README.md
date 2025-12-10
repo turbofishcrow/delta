@@ -36,13 +36,35 @@ Common delta signatures:
 - `+1+2` — Like the spacing in a 4:5:7 chord
 - `+1+1` — Like the spacing in a 4:5:6 chord
 
+### Free Deltas (+?)
+
+Each interval also has a **Free (+?)** checkbox. When checked, that delta is treated as a free variable during error calculation — the optimizer will find the best value for it.
+
+A delta is also treated as free if the target delta field is empty or contains an invalid value (e.g., non-numeric text).
+
+This is useful for **Partially Delta-Rational (PDR)** chords, where only some of the deltas have fixed integer ratios.
+
+For example, with chord 4:5:6:7:8 and target `+1+?+?+1`:
+- The first and last deltas are fixed at ratio 1
+- The middle two deltas are free to take any value
+- The optimizer finds the optimal values for the free deltas
+
+**Note:** Leading and trailing free deltas are automatically ignored (they don't constrain the chord). Only interior free deltas (between fixed deltas) are optimized.
+
 ### Least-Squares Linear Error
 
 Click **Calculate** to compute how well your chord approximates the target delta signature.
 
 The error measure finds the optimal real-valued harmonic `x` such that the target DR chord `x : x+D_1 : x+D_2 : ...` (where `D_1, D_2, ...` are cumulative sums of deltas) best fits your actual chord, then reports the root-sum-square error in the linear (frequency) domain.
 
-Currently only fully delta-rational chords are supported.
+**FDR (Fully Delta-Rational):** When no deltas are marked as free, a closed-form solution is used.
+
+**PDR (Partially Delta-Rational):** When some deltas are marked as free, an alternating optimization method is used:
+1. Fix free variables, solve for optimal `x` (closed form)
+2. Fix `x`, solve for optimal free variables (closed form)
+3. Repeat until convergence
+
+The result shows the error, optimal `x`, and (for PDR) the optimized values of the free variables.
 
 - Lower error = closer to the target delta signature
 - Error of 0 = exact match

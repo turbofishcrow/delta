@@ -527,6 +527,12 @@ btnAddInterval.addEventListener("click", () => {
               style="width: 80px"
             />
             Target delta
+            <input
+              type="checkbox"
+              id="input-interval-${currentIntervalCount}-free"
+              name="input-interval-${currentIntervalCount}-free"
+            />
+            Free (+?)
             <br/>
           </td>
           `
@@ -569,7 +575,7 @@ document.getElementById("btn-waveform-semisine").addEventListener("click", () =>
  * 
  * The error is: sqrt(sum((1 + D_i/x - f_i)^2))
  */
-function calculateLeastSquaresError() {
+function calculateLeastSquaresErrorForFDR() {
   const baseFreq = getBaseFrequency();
   
   // Get the chord as frequency ratios from root (f_1, f_2, ..., f_n)
@@ -641,7 +647,278 @@ function calculateLeastSquaresError() {
   return lsError;
 }
 
-document.getElementById("btn-calculate-error").addEventListener("click", calculateLeastSquaresError);
+/**
+ * Calculate PDR (Partially Delta-Rational) least-squares error using alternating optimization.
+ * 
+ * For a chord 1:f1:f2:...:fn with target delta signature where some deltas are free (+?),
+ * we optimize over x (the reference frequency) and the free delta variables.
+ * 
+ * The alternating method:
+ * 1. Fix free variables, solve for optimal x (closed form)
+ * 2. Fix x, solve for optimal free variables (closed form)
+ * 3. Repeat until convergence
+ */
+function calculatePDRError() {
+  const baseFreq = getBaseFrequency();
+  
+  // Get the chord data
+  const ratios = [];      // f_i values
+  const targetDeltas = []; // δ_i values (will be optimized if free)
+  const isFree = [];       // whether each delta is free
+  
+  for (let i = 1; i <= currentIntervalCount; i++) {
+    const centsInput = document.getElementById(`input-interval-${i}-cents`);
+    const targetDeltaInput = document.getElementById(`input-interval-${i}-target-delta`);
+    const freeCheckbox = document.getElementById(`input-interval-${i}-free`);
+    
+    if (!centsInput || !targetDeltaInput) continue;
+    
+    const cents = parseFloat(centsInput.value);
+    const targetDelta = parseFloat(targetDeltaInput.value);
+    const checkboxFree = freeCheckbox ? freeCheckbox.checked : false;
+    
+    if (isNaN(cents)) continue;
+    
+    // Treat as free if checkbox is checked OR if target delta is invalid/empty
+    const free = checkboxFree || isNaN(targetDelta);
+    
+    const f_i = centsToRatio(cents);
+    ratios.push(f_i);
+    targetDeltas.push(isNaN(targetDelta) ? 1 : targetDelta);
+    isFree.push(free);
+  }
+  
+  const n = ratios.length;
+  if (n === 0) return null;
+  
+  // Group consecutive free deltas into segments
+  // Each segment of consecutive free deltas shares one variable
+  const segments = []; // {start, end, isFree}
+  let segStart = 0;
+  for (let i = 0; i <= n; i++) {
+    if (i === n || (i > 0 && isFree[i] !== isFree[i-1])) {
+      segments.push({ start: segStart, end: i - 1, isFree: isFree[segStart] });
+      segStart = i;
+    }
+  }
+  
+  // Count free segments (excluding leading and trailing free segments)
+  let firstFixedIdx = segments.findIndex(s => !s.isFree);
+  let lastFixedIdx = segments.length - 1 - [...segments].reverse().findIndex(s => !s.isFree);
+  
+  if (firstFixedIdx === -1) {
+    // All deltas are free - no constraint, error is always 0
+    return { error: 0, x: 1, freeValues: targetDeltas.slice() };
+  }
+  
+  // Determine the range of intervals to include (excluding leading/trailing free)
+  const firstIncludedInterval = segments[firstFixedIdx].start;
+  const lastIncludedInterval = segments[lastFixedIdx].end;
+  
+  // Filter ratios and deltas to only include the interior range
+  // When trimming leading free intervals, we need to rebase the ratios
+  // relative to the new "root" (the interval just before the first included one)
+  let includedRatios;
+  if (firstIncludedInterval === 0) {
+    // No leading free intervals, use ratios as-is
+    includedRatios = ratios.slice(firstIncludedInterval, lastIncludedInterval + 1);
+  } else {
+    // Rebase ratios relative to the previous interval (which becomes the new root)
+    const newBaseRatio = ratios[firstIncludedInterval - 1];
+    includedRatios = ratios.slice(firstIncludedInterval, lastIncludedInterval + 1)
+      .map(r => r / newBaseRatio);
+  }
+  const includedTargetDeltas = targetDeltas.slice(firstIncludedInterval, lastIncludedInterval + 1);
+  const includedIsFree = isFree.slice(firstIncludedInterval, lastIncludedInterval + 1);
+  const includedN = includedRatios.length;
+  
+  // Re-segment the included range
+  const includedSegments = [];
+  segStart = 0;
+  for (let i = 0; i <= includedN; i++) {
+    if (i === includedN || (i > 0 && includedIsFree[i] !== includedIsFree[i-1])) {
+      includedSegments.push({ start: segStart, end: i - 1, isFree: includedIsFree[segStart] });
+      segStart = i;
+    }
+  }
+  
+  // Get indices of free segments (now all are interior since we trimmed leading/trailing)
+  const interiorFreeSegments = includedSegments.filter(s => s.isFree);
+  
+  const numFreeVars = interiorFreeSegments.length;
+  
+  // Initialize free variable values from current target deltas
+  let freeVarValues = interiorFreeSegments.map(seg => {
+    // Sum of deltas in this segment
+    let sum = 0;
+    for (let i = seg.start; i <= seg.end; i++) {
+      sum += includedTargetDeltas[i];
+    }
+    return sum;
+  });
+  
+  // Helper: compute cumulative deltas given current free variable values
+  function getCumulativeDeltas(freeVals) {
+    const deltas = includedTargetDeltas.slice();
+    
+    // Update free segments with their optimized values
+    interiorFreeSegments.forEach((seg, idx) => {
+      const segLength = seg.end - seg.start + 1;
+      const valPerDelta = freeVals[idx] / segLength;
+      for (let i = seg.start; i <= seg.end; i++) {
+        deltas[i] = valPerDelta;
+      }
+    });
+    
+    // Compute cumulative sums
+    const cumulative = [];
+    let sum = 0;
+    for (let i = 0; i < includedN; i++) {
+      sum += deltas[i];
+      cumulative.push(sum);
+    }
+    return cumulative;
+  }
+  
+  // Helper: compute optimal x given cumulative deltas
+  function computeOptimalX(cumDeltas) {
+    const sumD = cumDeltas.reduce((a, b) => a + b, 0);
+    const sumF = includedRatios.reduce((a, b) => a + b, 0);
+    const denom = -includedN + sumF;
+    if (Math.abs(denom) < 1e-10) return null;
+    return sumD / denom;
+  }
+  
+  // Helper: compute error given x and cumulative deltas
+  function computeError(x, cumDeltas) {
+    let sumSq = 0;
+    for (let i = 0; i < includedN; i++) {
+      const err = 1 + cumDeltas[i] / x - includedRatios[i];
+      sumSq += err * err;
+    }
+    return Math.sqrt(sumSq);
+  }
+  
+  // Helper: compute optimal free variable given x (for a single free segment)
+  function computeOptimalFreeVar(segIdx, x, currentFreeVals) {
+    const seg = interiorFreeSegments[segIdx];
+    const segLength = seg.end - seg.start + 1;
+    
+    // For a free segment spanning indices [seg.start, seg.end], we have one variable y
+    // representing the TOTAL delta for the segment. Each individual delta = y/segLength.
+    //
+    // The contribution of y to cumulative delta D_i:
+    // - For i < seg.start: 0
+    // - For seg.start <= i <= seg.end: (i - seg.start + 1) * (y / segLength)
+    // - For i > seg.end: y (full contribution)
+    //
+    // Let c_i = coefficient of y in D_i
+    // Error = sum_i (1 + (baseCumDeltas[i] + c_i * y)/x - f_i)^2
+    // Let a_i = 1 + baseCumDeltas[i]/x - f_i
+    // Error = sum_i (a_i + c_i * y/x)^2
+    // d/dy = sum_i 2 * (a_i + c_i * y/x) * (c_i / x) = 0
+    // sum_i (c_i * a_i + c_i^2 * y/x) = 0
+    // y = -x * sum_i(c_i * a_i) / sum_i(c_i^2)
+    
+    // Get current cumulative deltas without this segment's contribution
+    const testFreeVals = currentFreeVals.slice();
+    testFreeVals[segIdx] = 0;
+    const baseCumDeltas = getCumulativeDeltas(testFreeVals);
+    
+    let sumCA = 0;   // sum of c_i * a_i
+    let sumC2 = 0;   // sum of c_i^2
+    
+    for (let i = 0; i < includedN; i++) {
+      let c_i;
+      if (i < seg.start) {
+        c_i = 0;
+      } else if (i <= seg.end) {
+        c_i = (i - seg.start + 1) / segLength;
+      } else {
+        c_i = 1;
+      }
+      
+      if (c_i > 0) {
+        const a_i = 1 + baseCumDeltas[i] / x - includedRatios[i];
+        sumCA += c_i * a_i;
+        sumC2 += c_i * c_i;
+      }
+    }
+    
+    if (sumC2 < 1e-10) return currentFreeVals[segIdx];
+    
+    const optimalY = -x * sumCA / sumC2;
+    return Math.max(0.001, optimalY); // Ensure positive
+  }
+  
+  // Alternating optimization
+  const maxIter = 1000;
+  const tolerance = 1e-12;
+  let prevError = Infinity;
+  let x = 1;
+  
+  for (let iter = 0; iter < maxIter; iter++) {
+    // Step 1: Fix free variables, compute optimal x
+    const cumDeltas = getCumulativeDeltas(freeVarValues);
+    x = computeOptimalX(cumDeltas);
+    
+    if (x === null || x <= 0) {
+      return null;
+    }
+    
+    // Step 2: Fix x, compute optimal free variables
+    for (let j = 0; j < numFreeVars; j++) {
+      freeVarValues[j] = computeOptimalFreeVar(j, x, freeVarValues);
+    }
+    
+    // Check convergence
+    const newCumDeltas = getCumulativeDeltas(freeVarValues);
+    const error = computeError(x, newCumDeltas);
+    
+    if (Math.abs(prevError - error) < tolerance) {
+      break;
+    }
+    prevError = error;
+  }
+  
+  const finalCumDeltas = getCumulativeDeltas(freeVarValues);
+  const finalError = computeError(x, finalCumDeltas);
+  
+  return { error: finalError, x: x, freeValues: freeVarValues };
+}
+
+// Least-squares error function that handles PDR
+function calculateLeastSquaresError() {
+  // Check if any deltas are free
+  let hasFreeDeltas = false;
+  for (let i = 1; i <= currentIntervalCount; i++) {
+    const freeCheckbox = document.getElementById(`input-interval-${i}-free`);
+    if (freeCheckbox && freeCheckbox.checked) {
+      hasFreeDeltas = true;
+      break;
+    }
+  }
+  
+  if (hasFreeDeltas) {
+    const result = calculatePDRError();
+    if (result === null) {
+      document.getElementById("ls-error").textContent = "undefined";
+    } else {
+      let display = result.error.toFixed(6) + ` (x = ${result.x.toFixed(4)}`;
+      if (result.freeValues.length > 0) {
+        display += `, free: [${result.freeValues.map(v => v.toFixed(3)).join(", ")}]`;
+      }
+      display += ")";
+      document.getElementById("ls-error").textContent = display;
+    }
+  } else {
+    // No free deltas, use original FDR calculation
+    calculateLeastSquaresErrorForFDR();
+  }
+}
+
+// Set up event listeners
 document.getElementById("btn-recalc-from-cents").addEventListener("click", recalcFromCents);
 document.getElementById("btn-recalc-from-ratios").addEventListener("click", recalcFromRatios);
 document.getElementById("btn-update-from-deltas").addEventListener("click", updateAllFromDeltas);
+document.getElementById("btn-calculate-error").addEventListener("click", calculateLeastSquaresError);
