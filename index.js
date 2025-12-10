@@ -380,21 +380,28 @@ function updateDeltaDisplay(intervalIndex, firstDelta) {
   deltaInput.value = relativeDelta.toFixed(6);
 }
 
-// Recalculate all deltas from current cents values (also syncs ratios)
+// Recalculate all deltas from current interval values (tries ratio first, then cents as fallback)
 function recalcAllDeltas() {
-  // First, sync all ratios from cents
+  // First, sync cents from ratios (or keep cents if ratio is invalid)
   for (let i = 1; i <= currentIntervalCount; i++) {
     const centsInput = document.getElementById(`input-interval-${i}-cents`);
     const ratioInput = document.getElementById(`input-interval-${i}-ratio`);
     
     if (!centsInput || !ratioInput) continue;
     
-    const cents = parseFloat(centsInput.value);
-    if (isNaN(cents)) continue;
-    
-    // Update ratio to match cents
-    const ratio = centsToRatio(cents);
-    ratioInput.value = ratio.toFixed(6);
+    // Try to parse ratio first
+    const cents = ratioToCents(ratioInput.value);
+    if (!isNaN(cents)) {
+      // Ratio is valid, update cents from ratio
+      centsInput.value = cents.toFixed(3);
+    } else {
+      // Ratio is invalid, try to use cents and update ratio
+      const centsValue = parseFloat(centsInput.value);
+      if (!isNaN(centsValue)) {
+        const ratio = centsToRatio(centsValue);
+        ratioInput.value = ratio.toFixed(6);
+      }
+    }
   }
   
   // Recalculate all deltas based on current cents values
