@@ -17,12 +17,12 @@ For example, a chord with delta signature `+1+1` means the frequency difference 
 - **Multiple input formats**: Enter intervals as:
   - **Cents** (from root)
   - **Frequency ratio** (from root, e.g., `5/4` or `1.25`)
-  - **Relative delta** (frequency difference relative to the first interval's delta)
+  - **Delta** (frequency difference in reference to a unit)
 
 ### Interval Updates
 
 - **Update from cents/ratio (keep deltas)**: The changed interval updates, and all other intervals shift to maintain their delta values
-- **Update from delta (keep other deltas)**: The changed interval recalculates its cents/ratio, and other intervals shift while keeping their deltas fixed
+- **Update from delta (keep other deltas)**: The changed interval recalculates its cents/ratio based on intervals below it (based on previous size if it's the bottom interval), and intervals above it shift while keeping their deltas fixed
 - **Recalc deltas from cents**: A global button that recalculates all deltas based on the current cents values — useful after manually entering multiple cent values
 - **Update from all deltas (keep first interval)**: A global button that recalculates all cents/ratios from the current delta values, keeping the first (bottom) interval fixed — useful for setting up a specific delta signature
 

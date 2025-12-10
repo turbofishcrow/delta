@@ -255,45 +255,67 @@ function recalculateIntervalsOtherThan(intervalIndex) {
 
 function updateFromDelta(intervalIndex) {
   // When delta is updated, we need to recalculate the cents/ratio for this interval
-  // based on the delta values and the first interval's frequency difference
-  // Other intervals keep their deltas fixed
+  // and all intervals above it, keeping intervals below fixed.
+  // The unit delta is determined from the previous delta signature.
   
   const baseFreq = getBaseFrequency();
   
-  // Get the first interval's frequency difference (this is our reference delta = 1)
-  const firstCentsInput = document.getElementById("input-interval-1-cents");
-  const firstCents = parseFloat(firstCentsInput.value);
-  if (isNaN(firstCents)) return;
+  // We need to determine the unit delta from the current chord state.
+  // The unit delta can be computed from any interval: unitDelta = absoluteDelta / relativeDelta
+  // We'll use the second interval if available, otherwise we can't determine the unit.
   
-  const firstFreq = baseFreq * centsToRatio(firstCents);
-  const firstDelta = firstFreq - baseFreq; // This corresponds to relative delta = 1
+  let unitDelta;
   
-  if (firstDelta <= 0) return;
+  if (currentIntervalCount >= 2 && intervalIndex === 1) {
+    // Use the second interval to determine the unit delta
+    const secondCentsInput = document.getElementById("input-interval-2-cents");
+    const secondDeltaInput = document.getElementById("input-interval-2-delta");
+    const firstCentsInput = document.getElementById("input-interval-1-cents");
+    
+    const secondCents = parseFloat(secondCentsInput.value);
+    const secondRelativeDelta = parseFloat(secondDeltaInput.value);
+    const firstCents = parseFloat(firstCentsInput.value);
+    
+    if (isNaN(secondCents) || isNaN(secondRelativeDelta) || isNaN(firstCents) || secondRelativeDelta <= 0) return;
+    
+    const firstFreq = baseFreq * centsToRatio(firstCents);
+    const secondFreq = baseFreq * centsToRatio(secondCents);
+    const secondAbsoluteDelta = secondFreq - firstFreq;
+    
+    unitDelta = secondAbsoluteDelta / secondRelativeDelta;
+  } else if (intervalIndex === 1) {
+    // Only one interval exists, can't determine unit delta from other intervals
+    // In this case, the delta value acts as a direct scaling factor
+    const firstCentsInput = document.getElementById("input-interval-1-cents");
+    const firstDeltaInput = document.getElementById("input-interval-1-delta");
+    const firstCents = parseFloat(firstCentsInput.value);
+    const newFirstDelta = parseFloat(firstDeltaInput.value);
+    
+    if (isNaN(firstCents) || isNaN(newFirstDelta) || newFirstDelta <= 0) return;
+    
+    // With only one interval and no reference, we assume the current absolute delta IS the unit
+    // So changing delta to N means scaling by N
+    const firstFreq = baseFreq * centsToRatio(firstCents);
+    const firstAbsoluteDelta = firstFreq - baseFreq;
+    unitDelta = firstAbsoluteDelta; // Assume old delta was 1
+  } else {
+    // For intervals other than the first, use the first interval to determine unit delta
+    const firstCentsInput = document.getElementById("input-interval-1-cents");
+    const firstDeltaInput = document.getElementById("input-interval-1-delta");
+    const firstCents = parseFloat(firstCentsInput.value);
+    const firstRelativeDelta = parseFloat(firstDeltaInput.value) || 1;
+    
+    if (isNaN(firstCents)) return;
+    
+    const firstFreq = baseFreq * centsToRatio(firstCents);
+    const firstAbsoluteDelta = firstFreq - baseFreq;
+    unitDelta = firstAbsoluteDelta / firstRelativeDelta;
+  }
   
-  // Now calculate the new frequency for this interval based on its delta
-  const deltaInput = document.getElementById(`input-interval-${intervalIndex}-delta`);
-  const relativeDelta = parseFloat(deltaInput.value);
-  if (isNaN(relativeDelta)) return;
+  if (unitDelta <= 0) return;
   
-  // The absolute frequency difference for this interval
-  const absoluteDelta = relativeDelta * firstDelta;
-  
-  // The new frequency is the previous frequency + absolute delta
-  const prevFreq = getPreviousFrequency(intervalIndex);
-  const newFreq = prevFreq + absoluteDelta;
-  
-  // Convert to cents from base
-  const newCents = 1200 * Math.log2(newFreq / baseFreq);
-  
-  const centsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
-  const ratioInput = document.getElementById(`input-interval-${intervalIndex}-ratio`);
-  
-  centsInput.value = newCents.toFixed(3);
-  ratioInput.value = (newFreq / baseFreq).toFixed(6);
-  
-  // Recalculate cents/ratio for intervals other than this one, keeping their deltas fixed
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    if (i === intervalIndex) continue;
+  // Recalculate cents/ratio for this interval and all intervals above it
+  for (let i = intervalIndex; i <= currentIntervalCount; i++) {
     const iDeltaInput = document.getElementById(`input-interval-${i}-delta`);
     const iCentsInput = document.getElementById(`input-interval-${i}-cents`);
     const iRatioInput = document.getElementById(`input-interval-${i}-ratio`);
@@ -303,8 +325,8 @@ function updateFromDelta(intervalIndex) {
     const iRelativeDelta = parseFloat(iDeltaInput.value);
     if (isNaN(iRelativeDelta)) continue;
     
-    // Calculate new frequency based on the stored delta
-    const iAbsoluteDelta = iRelativeDelta * firstDelta;
+    // Calculate new frequency based on the delta
+    const iAbsoluteDelta = iRelativeDelta * unitDelta;
     const iPrevFreq = getPreviousFrequency(i);
     const iNewFreq = iPrevFreq + iAbsoluteDelta;
     
@@ -474,7 +496,7 @@ btnAddInterval.addEventListener("click", () => {
               value="1"
               style="width: 80px"
             />
-            Relative delta
+            Delta
             <button id="btn-update-delta-${currentIntervalCount}">Update (keep other deltas)</button>
             <br/>
             <input
