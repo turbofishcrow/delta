@@ -1,0 +1,353 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delta-Rational Chord Error Calculation Tests</title>
+    <style>
+      body {
+        font-family: monospace;
+        max-width: 1200px;
+        margin: 20px auto;
+        padding: 0 20px;
+      }
+      h1 {
+        color: #333;
+      }
+      .test-case {
+        margin: 20px 0;
+        padding: 15px;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+      }
+      .test-case h3 {
+        margin-top: 0;
+        color: #444;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0;
+      }
+      th, td {
+        padding: 8px;
+        text-align: left;
+        border: 1px solid #ddd;
+      }
+      th {
+        background-color: #f5f5f5;
+        font-weight: bold;
+      }
+      .pass {
+        background-color: #d4edda;
+        color: #155724;
+      }
+      .fail {
+        background-color: #f8d7da;
+        color: #721c24;
+      }
+      .summary {
+        margin: 20px 0;
+        padding: 15px;
+        background-color: #e7f3ff;
+        border-radius: 5px;
+        font-size: 16px;
+      }
+      .tolerance-note {
+        font-style: italic;
+        color: #666;
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Delta-Rational Chord Error Calculation Tests</h1>
+    <p>Testing FDR error calculation across all 4 modes (Linear/Log × Rooted/Pairwise)</p>
+    <div class="tolerance-note">
+      Tolerance: x within 0.005, error within 1e-6 (linear) or 0.1 ¢ (logarithmic)
+    </div>
+    <div id="test-results"></div>
+    <div id="summary" class="summary"></div>
+
+    <script>
+      // Minimal helper functions (copied from index.js)
+      function centsToRatio(cents) {
+        return Math.pow(2, cents / 1200);
+      }
+
+      // Core error calculation function (standalone version)
+      function calculateFDRErrorStandalone(ratios, targetDeltas, domain, model) {
+        const n = ratios.length;
+
+        // Calculate cumulative deltas
+        const cumulativeDeltas = [];
+        let cumSum = 0;
+        for (let i = 0; i < n; i++) {
+          cumSum += targetDeltas[i];
+          cumulativeDeltas.push(cumSum);
+        }
+
+        const sumD = cumulativeDeltas.reduce((a, b) => a + b, 0);
+
+        // Build error function
+        function computeError(x) {
+          if (x <= 0) return Infinity;
+
+          const targetRatios = [1];
+          for (let i = 0; i < n; i++) {
+            targetRatios.push(1 + cumulativeDeltas[i] / x);
+          }
+
+          let sumSquaredError = 0;
+
+          if (model === "rooted") {
+            for (let i = 0; i < n; i++) {
+              const target = targetRatios[i + 1];
+              const actual = ratios[i];
+
+              if (domain === "linear") {
+                const diff = target - actual;
+                sumSquaredError += diff * diff;
+              } else {
+                const diff = Math.log(target) - Math.log(actual);
+                sumSquaredError += diff * diff;
+              }
+            }
+          } else {
+            const allRatios = [1, ...ratios];
+            const allTargetRatios = targetRatios;
+
+            for (let i = 0; i < allTargetRatios.length; i++) {
+              for (let j = i + 1; j < allTargetRatios.length; j++) {
+                const targetInterval = allTargetRatios[j] / allTargetRatios[i];
+                const actualInterval = allRatios[j] / allRatios[i];
+
+                if (domain === "linear") {
+                  const diff = targetInterval - actualInterval;
+                  sumSquaredError += diff * diff;
+                } else {
+                  const diff = Math.log(targetInterval) - Math.log(actualInterval);
+                  sumSquaredError += diff * diff;
+                }
+              }
+            }
+          }
+
+          return sumSquaredError;
+        }
+
+        // Grid search
+        const avgRatio = ratios.reduce((a, b) => a + b, 0) / n;
+        let xMin = sumD / (avgRatio * 10);
+        let xMax = sumD / (avgRatio * 0.1);
+
+        let bestX = xMin;
+        let bestError = computeError(xMin);
+        const coarseSteps = 1000;
+        const coarseStep = (xMax - xMin) / coarseSteps;
+
+        for (let i = 0; i <= coarseSteps; i++) {
+          const testX = xMin + i * coarseStep;
+          const error = computeError(testX);
+          if (error < bestError) {
+            bestError = error;
+            bestX = testX;
+          }
+        }
+
+        xMin = Math.max(bestX - coarseStep, sumD / (avgRatio * 10));
+        xMax = bestX + coarseStep;
+        const fineSteps = 2000;
+        const fineStep = (xMax - xMin) / fineSteps;
+
+        for (let i = 0; i <= fineSteps; i++) {
+          const testX = xMin + i * fineStep;
+          const error = computeError(testX);
+          if (error < bestError) {
+            bestError = error;
+            bestX = testX;
+          }
+        }
+
+        const x = bestX;
+        let lsError = Math.sqrt(bestError);
+
+        if (domain === "log") {
+          lsError = lsError * (1200 / Math.LN2);
+        }
+
+        return { error: lsError, x };
+      }
+
+      // Test cases
+      const testCases = [
+        {
+          name: "4:5:6 with +1+1",
+          description: "Exact isodifferential chord",
+          ratios: [1.25, 1.5],
+          deltas: [1, 1],
+          expectedX: {
+            "linear-rooted": 4.0000,
+            "linear-pairwise": 4.0000,
+            "log-rooted": 4.0000,
+            "log-pairwise": 4.0000
+          },
+          expectedError: {
+            "linear-rooted": 0.000001,
+            "linear-pairwise": 0.000001,
+            "log-rooted": 0.001,
+            "log-pairwise": 0.001
+          }
+        },
+        {
+          name: "0c-400c-720c with +1+1",
+          description: "Approximate DR chord (isodifferential)",
+          ratios: [centsToRatio(400), centsToRatio(720)],
+          deltas: [1, 1],
+          expectedX: {
+            "linear-rooted": 3.8719,
+            "linear-pairwise": 3.8758,
+            "log-rooted": 3.8699,
+            "log-pairwise": 3.8756
+          },
+          expectedError: {
+            "linear-rooted": 0.001845,
+            "linear-pairwise": 0.002833,
+            "log-rooted": 2.430,
+            "log-pairwise": 3.984
+          }
+        },
+        {
+          name: "0c-276.9c-738.5c-923.1c with +1+2+1",
+          description: "Approximate DR chord with +1+2+1 signature",
+          ratios: [centsToRatio(276.9), centsToRatio(738.5), centsToRatio(923.1)],
+          deltas: [1, 2, 1],
+          expectedX: {
+            "linear-rooted": 5.6682,
+            "linear-pairwise": 5.6561,
+            "log-rooted": 5.6696,
+            "log-pairwise": 5.6541
+          },
+          expectedError: {
+            "linear-rooted": 0.004248,
+            "linear-pairwise": 0.007724,
+            "log-rooted": 5.523,
+            "log-pairwise": 10.366
+          }
+        },
+        {
+          name: "0c-257.1c-771.4c-942.9c with +1+3+1",
+          description: "Approximate DR chord with +1+3+1 signature",
+          ratios: [centsToRatio(257.1), centsToRatio(771.4), centsToRatio(942.9)],
+          deltas: [1, 3, 1],
+          expectedX: {
+            "linear-rooted": 6.9702,
+            "linear-pairwise": 7.0685,
+            "log-rooted": 6.9589,
+            "log-pairwise": 7.0803
+          },
+          expectedError: {
+            "linear-rooted": 0.021831,
+            "linear-pairwise": 0.039983,
+            "log-rooted": 29.278,
+            "log-pairwise": 52.697
+          }
+        }
+      ];
+
+      // Run tests
+      function runTests() {
+        const resultsDiv = document.getElementById("test-results");
+        let totalTests = 0;
+        let passedTests = 0;
+
+        testCases.forEach(testCase => {
+          const testDiv = document.createElement("div");
+          testDiv.className = "test-case";
+
+          const title = document.createElement("h3");
+          title.textContent = testCase.name;
+          testDiv.appendChild(title);
+
+          const desc = document.createElement("p");
+          desc.textContent = testCase.description;
+          testDiv.appendChild(desc);
+
+          const table = document.createElement("table");
+          table.innerHTML = `
+            <tr>
+              <th>Mode</th>
+              <th>Expected x</th>
+              <th>Computed x</th>
+              <th>x Diff</th>
+              <th>Expected Error</th>
+              <th>Computed Error</th>
+              <th>Error Diff</th>
+              <th>Result</th>
+            </tr>
+          `;
+
+          const modes = [
+            { domain: "linear", model: "rooted", key: "linear-rooted" },
+            { domain: "linear", model: "pairwise", key: "linear-pairwise" },
+            { domain: "log", model: "rooted", key: "log-rooted" },
+            { domain: "log", model: "pairwise", key: "log-pairwise" }
+          ];
+
+          modes.forEach(mode => {
+            totalTests++;
+            const result = calculateFDRErrorStandalone(
+              testCase.ratios,
+              testCase.deltas,
+              mode.domain,
+              mode.model
+            );
+
+            const expectedX = testCase.expectedX[mode.key];
+            const expectedError = testCase.expectedError[mode.key];
+            const xDiff = Math.abs(result.x - expectedX);
+            const errorDiff = Math.abs(result.error - expectedError);
+
+            // Tolerances: relatively tight since we're comparing against pre-computed values
+            const xTolerance = 0.005; // 0.5% tolerance on x
+            const errorTolerance = mode.domain === "log" ? 0.1 : 0.000001; // 0.1¢ or 1e-6 for linear
+
+            const xPass = xDiff < xTolerance;
+            const errorPass = errorDiff < errorTolerance;
+            const pass = xPass && errorPass;
+
+            if (pass) passedTests++;
+
+            const row = document.createElement("tr");
+            row.className = pass ? "pass" : "fail";
+            row.innerHTML = `
+              <td>${mode.domain} + ${mode.model}</td>
+              <td>${expectedX.toFixed(4)}</td>
+              <td>${result.x.toFixed(4)}</td>
+              <td>${xDiff.toFixed(6)}</td>
+              <td>${expectedError.toFixed(mode.domain === "log" ? 3 : 6)}${mode.domain === "log" ? " ¢" : ""}</td>
+              <td>${result.error.toFixed(mode.domain === "log" ? 3 : 6)}${mode.domain === "log" ? " ¢" : ""}</td>
+              <td>${errorDiff.toFixed(mode.domain === "log" ? 3 : 6)}${mode.domain === "log" ? " ¢" : ""}</td>
+              <td><strong>${pass ? "PASS" : "FAIL"}</strong></td>
+            `;
+            table.appendChild(row);
+          });
+
+          testDiv.appendChild(table);
+          resultsDiv.appendChild(testDiv);
+        });
+
+        // Summary
+        const summaryDiv = document.getElementById("summary");
+        const passRate = ((passedTests / totalTests) * 100).toFixed(1);
+        summaryDiv.innerHTML = `
+          <strong>Test Summary:</strong> ${passedTests}/${totalTests} tests passed (${passRate}%)
+        `;
+        summaryDiv.className = passedTests === totalTests ? "summary pass" : "summary fail";
+      }
+
+      // Run tests on load
+      window.addEventListener("load", runTests);
+    </script>
+  </body>
+</html>
