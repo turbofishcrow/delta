@@ -238,11 +238,15 @@ function generateStartingPoints(fValues, deltas, numFree, numStarts) {
  * @param {Array} fValues - Target frequency ratios [f1, f2, f3, ...]
  * @param {Object} options - Optimization options
  * @param {string} options.method - Optimizer to use: 'lbfgs' (default), 'nelder-mead', 'powell'
+ * @param {string} options.domain - Error domain: 'linear' (default) or 'log'
+ * @param {string} options.model - Error model: 'rooted' (default), 'pairwise', or 'all-steps'
  * @returns {Object} Solution with x, freeDeltas, error, success
  */
 function solvePDRChord(deltas, fValues, options = {}) {
   const numFree = deltas.filter(d => d === null).length;
   const method = options.method || 'lbfgs';
+  const domain = options.domain || 'linear';
+  const model = options.model || 'rooted';
 
   // Build error function
   function errorFunction(params) {
@@ -263,15 +267,65 @@ function solvePDRChord(deltas, fValues, options = {}) {
       D.push(cumsum);
     }
 
-    // Sum of squared errors
-    let error = 0;
-    for (let i = 0; i < fValues.length; i++) {
-      const predicted = (x + D[i]) / x;
-      const diff = predicted - fValues[i];
-      error += diff * diff;
+    // Build predicted ratios from root
+    const predictedRatios = D.map(d => (x + d) / x);
+
+    // Calculate error based on model
+    let sumSquaredError = 0;
+
+    if (model === 'rooted') {
+      // Rooted: compare each note to root
+      for (let i = 0; i < fValues.length; i++) {
+        const predicted = predictedRatios[i];
+        const actual = fValues[i];
+
+        if (domain === 'linear') {
+          const diff = predicted - actual;
+          sumSquaredError += diff * diff;
+        } else { // log
+          const diff = Math.log(predicted) - Math.log(actual);
+          sumSquaredError += diff * diff;
+        }
+      }
+    } else if (model === 'pairwise') {
+      // Pairwise: compare all interval pairs
+      const allPredicted = [1, ...predictedRatios];
+      const allActual = [1, ...fValues];
+
+      for (let i = 0; i < allPredicted.length; i++) {
+        for (let j = i + 1; j < allPredicted.length; j++) {
+          const predictedInterval = allPredicted[j] / allPredicted[i];
+          const actualInterval = allActual[j] / allActual[i];
+
+          if (domain === 'linear') {
+            const diff = predictedInterval - actualInterval;
+            sumSquaredError += diff * diff;
+          } else { // log
+            const diff = Math.log(predictedInterval) - Math.log(actualInterval);
+            sumSquaredError += diff * diff;
+          }
+        }
+      }
+    } else if (model === 'all-steps') {
+      // All-steps: compare only successive intervals
+      const allPredicted = [1, ...predictedRatios];
+      const allActual = [1, ...fValues];
+
+      for (let i = 0; i < fValues.length; i++) {
+        const predictedInterval = allPredicted[i + 1] / allPredicted[i];
+        const actualInterval = allActual[i + 1] / allActual[i];
+
+        if (domain === 'linear') {
+          const diff = predictedInterval - actualInterval;
+          sumSquaredError += diff * diff;
+        } else { // log
+          const diff = Math.log(predictedInterval) - Math.log(actualInterval);
+          sumSquaredError += diff * diff;
+        }
+      }
     }
 
-    return error;
+    return sumSquaredError;
   }
 
   // Set up bounds: x > 0, free variables unbounded
@@ -304,7 +358,7 @@ function solvePDRChord(deltas, fValues, options = {}) {
     }
   } else if (method === 'nelder-mead') {
     const optimizer = new NelderMead({
-      maxIterations: options.maxIterations || 300,
+      maxIterations: options.maxIterations || 400,
       tolerance: options.tolerance || 1e-8
     });
 
@@ -321,7 +375,7 @@ function solvePDRChord(deltas, fValues, options = {}) {
     }
   } else if (method === 'powell') {
     const optimizer = new Powell({
-      maxIterations: options.maxIterations || 150,
+      maxIterations: options.maxIterations || 250,
       tolerance: options.tolerance || 1e-8
     });
 

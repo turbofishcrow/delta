@@ -103,6 +103,29 @@ Open `test_pdr.html` in a web browser. The tests will run automatically and disp
 - All methods use multiple starting points (5 by default) and select the best result
 - Bounds: x > 0.01, free deltas unbounded
 - Tolerance: 1e-8 for all methods
-- Max iterations: L-BFGS=100, Nelder-Mead=200, Powell=150
+- Max iterations: L-BFGS=100, Nelder-Mead=400, Powell=250
 
 All three optimizers converge to similar solutions with errors < 0.001 and agreement range < 0.0005.
+
+## Error Domains and Models
+
+Like FDR, PDR now supports multiple error calculation modes:
+
+**Domains:**
+- `linear` (default): Minimize error in frequency ratio space
+- `log`: Minimize error in logarithmic space (perceptually more uniform)
+
+**Models:**
+- `rooted` (default): Compare each note to the root
+- `pairwise`: Compare all interval pairs (ensures global consistency)
+- `all-steps`: Compare only successive intervals (better for melodic applications)
+
+This gives 6 total modes (3 models × 2 domains). Use the `domain` and `model` options in `solvePDRChord()`:
+
+```javascript
+solvePDRChord(deltas, ratios, {
+  method: 'lbfgs',
+  domain: 'log',      // 'linear' or 'log'
+  model: 'pairwise'   // 'rooted', 'pairwise', or 'all-steps'
+});
+```

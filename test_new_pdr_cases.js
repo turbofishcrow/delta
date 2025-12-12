@@ -50,7 +50,8 @@ testCases.forEach(tc => {
   console.log(`Expected: x=${tc.expected.x}, free=[${tc.expected.free}]`);
 
   const results = methods.map(m => {
-    const r = solvePDRChord(tc.deltas, tc.ratios, { method: m, maxIterations: 200, numStarts: 5 });
+    const maxIter = m === 'lbfgs' ? 100 : m === 'nelder-mead' ? 400 : 250;
+    const r = solvePDRChord(tc.deltas, tc.ratios, { method: m, maxIterations: maxIter, numStarts: 5 });
     return { method: m, x: r.x, free: r.freeDeltas, error: r.error, success: r.success };
   });
 
