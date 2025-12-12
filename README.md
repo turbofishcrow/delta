@@ -53,11 +53,23 @@ For example, with chord 4:5:6:7:8 and target `+1+?+?+1`:
 
 **Note:** Leading and trailing free deltas are automatically ignored (they don't constrain the chord). Only interior free deltas (between fixed deltas) are optimized.
 
-### Least-Squares Linear Error
+### Least-Squares Error
 
 Click **Calculate** to compute how well your chord approximates the target delta signature.
 
-The error measure finds the optimal real-valued harmonic `x` such that the target DR chord `x : x+D_1 : x+D_2 : ...` (where `D_1, D_2, ...` are cumulative sums of deltas) best fits your actual chord, then reports the root-sum-square error in the linear (frequency) domain.
+Before calculating, you can choose:
+- **Domain**: Linear (frequency space) or Logarithmic (pitch space, in cents) — default: **Logarithmic**
+- **Error model**: Rooted (from root) or Pairwise (all intervals) — default: **Pairwise**
+
+The error measure finds the optimal real-valued harmonic `x` such that the target DR chord `x : x+D_1 : x+D_2 : ...` (where `D_1, D_2, ...` are cumulative sums of deltas) best fits your actual chord, then reports the root-mean-square error.
+
+**Domain modes:**
+- **Linear**: Error measured in frequency ratio units (dimensionless)
+- **Logarithmic**: Error measured in cents (more musically intuitive)
+
+**Error model modes:**
+- **Rooted**: Compares each interval from the root (n comparisons for n intervals)
+- **Pairwise**: Compares all interval pairs including non-rooted intervals (n(n+1)/2 comparisons)
 
 The result shows the error, optimal `x`, and (for PDR) the optimized values of the free variables.
 
@@ -96,21 +108,49 @@ To explore a just major chord (4:5:6) as a delta-rational chord:
 
 ## Error Computation: Technical Notes
 
-- **FDR (Fully Delta-Rational):** When no deltas are marked as free, a closed-form solution is used.
-- **PDR (Partially Delta-Rational):** Uses L-BFGS-B optimization to minimize the sum of squared errors over all variables simultaneously. The optimization:
-  - Solves for the root real-valued harmonic `x` (constrained to `x > 0`)
-  - Solves for all free delta variables (unbounded)
-  - Uses multiple starting points for robustness
-  - Employs a log-barrier method to enforce the positivity constraint on `x`
-  - Scales the delta signature when `x` is guessed to be small
+### FDR (Fully Delta-Rational)
+When no deltas are marked as free, a closed-form solution is used to find the optimal `x`:
+```
+x = sum(Dᵢ) / (-n + sum(fᵢ))
+```
 
-The error formula minimizes the sum of squared differences between the target DR chord ratios and the actual chord ratios in the linear (frequency) domain:
+### PDR (Partially Delta-Rational)
+Uses L-BFGS-B optimization to minimize the sum of squared errors over all variables simultaneously. The optimization:
+- Solves for the root real-valued harmonic `x` (constrained to `x > 0`)
+- Solves for all free delta variables (unbounded)
+- Uses multiple starting points for robustness
+- Employs a log-barrier method to enforce the positivity constraint on `x`
+- Scales the delta signature when `x` is guessed to be small
+
+### Error Formulas
+
+The error is computed as the root-mean-square difference between the target and actual chords. The target chord has ratios `x : x+D₁ : x+D₂ : ...` where `Dᵢ` are cumulative deltas.
+
+**Linear + Rooted:**
 ```
 minimize √(Σᵢ ((x + Dᵢ)/x - fᵢ)²)
 ```
+Error in frequency ratio units (dimensionless).
 
-where `fᵢ` are the cumulative frequency ratios from the root, `Dᵢ` are the cumulative deltas, and `x` is the base frequency of the chord in the same units as the deltas.
-Only rooted intervals are included.
+**Linear + Pairwise:**
+```
+minimize √(Σᵢ<ⱼ ((x + Dⱼ)/(x + Dᵢ) - fⱼ/fᵢ)²)
+```
+Compares all interval pairs. Error in frequency ratio units.
+
+**Logarithmic + Rooted:**
+```
+minimize √(Σᵢ (log((x + Dᵢ)/x) - log(fᵢ))²) × (1200/ln2)
+```
+Error computed in nepers then converted to cents.
+
+**Logarithmic + Pairwise:**
+```
+minimize √(Σᵢ<ⱼ (log((x + Dⱼ)/(x + Dᵢ)) - log(fⱼ/fᵢ))²) × (1200/ln2)
+```
+Compares all interval pairs in log space. Error in cents.
+
+In all formulas, `fᵢ` are the cumulative frequency ratios from the root, `Dᵢ` are the cumulative deltas, and `x` is the base frequency of the target chord in the same units as the deltas.
 
 ## Running Locally
 

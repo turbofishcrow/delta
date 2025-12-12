@@ -681,17 +681,22 @@ document.getElementById("input-base-frequency").addEventListener("input", refres
 // ============ Least-Squares Linear Error ============
 
 /**
- * Calculate the least-squares linear error for approximating a target delta signature.
- * 
+ * Calculate the least-squares error for approximating a target delta signature (FDR).
+ *
+ * @param {string} domain - "linear" or "log" (logarithmic)
+ * @param {string} model - "rooted" (from root) or "pairwise" (all intervals)
+ * @returns {Object|null} - {error, x, targetRatios, deltaSignature} or null if error
+ *
  * Given a chord 1:f1:f2:...:fn and a target delta signature +δ1+δ2+...+δn,
  * we find the x that minimizes the sum of squared errors and return that error.
- * 
- * The optimal x is: x = sum(D_i) / (-n + sum(f_i))
- * where D_i = sum of first i deltas (cumulative)
- * 
- * The error is: sqrt(sum((1 + D_i/x - f_i)^2))
+ *
+ * For rooted models: optimal x = sum(D_i) / (-n + sum(f_i))
+ * For pairwise models: same x formula works
+ *
+ * Linear domain: error in ratio units
+ * Log domain: error in cents (converted from nepers)
  */
-function calculateLeastSquaresErrorForFDR() {
+function calculateFDRError(domain, model) {
   const baseFreq = getBaseFrequency();
   
   // Get the chord as frequency ratios from root (f_1, f_2, ..., f_n)
@@ -748,31 +753,72 @@ function calculateLeastSquaresErrorForFDR() {
     return;
   }
   
-  // Calculate error: sqrt(sum((1 + D_i/x - f_i)^2))
-  let sumSquaredError = 0;
+  // Compute target ratios from delta signature: f_i = 1 + D_i/x
+  const targetRatios = [1]; // Root
   for (let i = 0; i < n; i++) {
-    const error = 1 + cumulativeDeltas[i] / x - ratios[i];
-    sumSquaredError += error * error;
+    targetRatios.push(1 + cumulativeDeltas[i] / x);
   }
-  
-  const lsError = Math.sqrt(sumSquaredError);
-  
+
+  // Calculate error based on domain and model
+  let sumSquaredError = 0;
+
+  if (model === "rooted") {
+    // Rooted: compare each interval from root
+    for (let i = 0; i < n; i++) {
+      const target = targetRatios[i + 1]; // targetRatios[0] is root = 1
+      const actual = ratios[i];
+
+      if (domain === "linear") {
+        const diff = target - actual;
+        sumSquaredError += diff * diff;
+      } else { // log
+        const diff = Math.log(target) - Math.log(actual); // in nepers
+        sumSquaredError += diff * diff;
+      }
+    }
+  } else { // pairwise
+    // Pairwise: compare all interval pairs
+    // Include the root (index 0) as ratio 1
+    const allRatios = [1, ...ratios];
+    const allTargetRatios = targetRatios;
+
+    for (let i = 0; i < allTargetRatios.length; i++) {
+      for (let j = i + 1; j < allTargetRatios.length; j++) {
+        const targetInterval = allTargetRatios[j] / allTargetRatios[i];
+        const actualInterval = allRatios[j] / allRatios[i];
+
+        if (domain === "linear") {
+          const diff = targetInterval - actualInterval;
+          sumSquaredError += diff * diff;
+        } else { // log
+          const diff = Math.log(targetInterval) - Math.log(actualInterval); // in nepers
+          sumSquaredError += diff * diff;
+        }
+      }
+    }
+  }
+
+  let lsError = Math.sqrt(sumSquaredError);
+
+  // Convert to cents if logarithmic
+  if (domain === "log") {
+    lsError = lsError * (1200 / Math.LN2); // nepers to cents
+  }
+
   // Build target delta signature string
   const deltaSignature = "+" + targetDeltas.join("+");
-  
-  // Compute target ratios from delta signature: f_i = 1 + D_i/x
-  targetRatiosForViz = [1]; // Root
-  for (let i = 0; i < n; i++) {
-    targetRatiosForViz.push(1 + cumulativeDeltas[i] / x);
-  }
-  
+
+  // Store target ratios for visualization
+  targetRatiosForViz = targetRatios;
+
   // Display result
-  document.getElementById("ls-error").textContent = lsError.toFixed(6) + ` (x = ${x.toFixed(4)}, target: ${deltaSignature})`;
-  
+  const errorStr = lsError.toFixed(6) + (domain === "log" ? " ¢" : "");
+  document.getElementById("ls-error").textContent = errorStr + ` (x = ${x.toFixed(4)}, target: ${deltaSignature})`;
+
   // Update visualization to show target
   updateVisualization();
-  
-  return lsError;
+
+  return {error: lsError, x, targetRatios, deltaSignature};
 }
 
 /**
@@ -1046,15 +1092,101 @@ function generateStartingPoints(fValues, deltas, numFree, numStarts) {
 }
 
 /**
+ * Process PDR chord data: coallesce consecutive free deltas and trim leading/trailing free segments.
+ *
+ * @param {Array<number>} intervalsFromRoot - Frequency ratios from root for each interval
+ * @param {Array<number>} targetDeltas - Target delta values for each interval
+ * @param {Array<boolean>} isFree - Whether each delta is free (to be optimized)
+ * @returns {Object|null} Processed data or null if all deltas are free:
+ *   - includedRatios: Ratios after trimming and rebasing
+ *   - includedTargetDeltas: Target deltas for included range
+ *   - includedIsFree: Free flags for included range
+ *   - interiorFreeSegments: Array of {start, end, isFree} for free segments within included range
+ *   - firstIncludedInterval: Original index of first included interval
+ *   - lastIncludedInterval: Original index of last included interval
+ */
+function preprocessPDRChordData(intervalsFromRoot, targetDeltas, isFree) {
+  const n = intervalsFromRoot.length;
+  if (n === 0) return null;
+
+  // Group consecutive free deltas into segments
+  const segments = [];
+  let segStart = 0;
+  for (let i = 0; i <= n; i++) {
+    if (i === n || (i > 0 && isFree[i] !== isFree[i-1])) {
+      segments.push({ start: segStart, end: i - 1, isFree: isFree[segStart] });
+      segStart = i;
+    }
+  }
+
+  // Find first and last fixed segments (trim leading/trailing free)
+  let firstFixedIdx = segments.findIndex(s => !s.isFree);
+  let lastFixedIdx = segments.length - 1 - [...segments].reverse().findIndex(s => !s.isFree);
+
+  if (firstFixedIdx === -1) {
+    // All deltas are free - no constraint, cannot optimize
+    return null;
+  }
+
+  // Determine the range of intervals to include (excluding leading/trailing free)
+  const firstIncludedInterval = segments[firstFixedIdx].start;
+  const lastIncludedInterval = segments[lastFixedIdx].end;
+
+  // Build the chord starting from the appropriate base note
+  // If we trimmed leading intervals, we need to rebase everything
+  let baseRatio = 1.0;
+  if (firstIncludedInterval > 0) {
+    baseRatio = intervalsFromRoot[firstIncludedInterval - 1];
+  }
+
+  // For the included range, we need CUMULATIVE ratios from the (possibly rebased) root
+  // The least-squares formula uses f_i = (x + D_i)/x where f_i is the ratio to root
+  const includedRatios = [];
+  for (let i = firstIncludedInterval; i <= lastIncludedInterval; i++) {
+    const cumulativeRatio = intervalsFromRoot[i] / baseRatio;
+    includedRatios.push(cumulativeRatio);
+  }
+
+  const includedTargetDeltas = targetDeltas.slice(firstIncludedInterval, lastIncludedInterval + 1);
+  const includedIsFree = isFree.slice(firstIncludedInterval, lastIncludedInterval + 1);
+  const includedN = includedRatios.length;
+
+  // Re-segment the included range
+  const includedSegments = [];
+  segStart = 0;
+  for (let i = 0; i <= includedN; i++) {
+    if (i === includedN || (i > 0 && includedIsFree[i] !== includedIsFree[i-1])) {
+      includedSegments.push({ start: segStart, end: i - 1, isFree: includedIsFree[segStart] });
+      segStart = i;
+    }
+  }
+
+  // Get indices of free segments (now all are interior)
+  const interiorFreeSegments = includedSegments.filter(s => s.isFree);
+
+  return {
+    includedRatios,
+    includedTargetDeltas,
+    includedIsFree,
+    interiorFreeSegments,
+    firstIncludedInterval,
+    lastIncludedInterval
+  };
+}
+
+/**
  * Calculate PDR (Partially Delta-Rational) least-squares error.
  * Rewritten to use L-BFGS-B optimization.
- * 
+ *
+ * @param {string} domain - "linear" or "log" (logarithmic)
+ * @param {string} model - "rooted" (from root) or "pairwise" (all intervals)
+ *
  * This function expects to be called from a UI context where:
  * - getBaseFrequency() returns the base frequency
  * - currentIntervalCount is the number of intervals
  * - DOM elements exist with IDs: input-interval-{i}-cents, input-interval-{i}-target-delta, input-interval-{i}-free
  */
-function calculatePDRError() {
+function calculatePDRError(domain, model) {
   const baseFreq = getBaseFrequency();
   
   // Get the chord data - intervals from root
@@ -1084,49 +1216,19 @@ function calculatePDRError() {
     isFree.push(free);
   }
   
-  const n = intervalsFromRoot.length;
-  if (n === 0) return null;
-  
-  // Group consecutive free deltas into segments
-  const segments = [];
-  let segStart = 0;
-  for (let i = 0; i <= n; i++) {
-    if (i === n || (i > 0 && isFree[i] !== isFree[i-1])) {
-      segments.push({ start: segStart, end: i - 1, isFree: isFree[segStart] });
-      segStart = i;
-    }
-  }
-  
-  // Find first and last fixed segments (trim leading/trailing free)
-  let firstFixedIdx = segments.findIndex(s => !s.isFree);
-  let lastFixedIdx = segments.length - 1 - [...segments].reverse().findIndex(s => !s.isFree);
-  
-  if (firstFixedIdx === -1) {
+  // Process chord data: coalesce consecutive free deltas and trim leading/trailing free segments
+  const processed = preprocessPDRChordData(intervalsFromRoot, targetDeltas, isFree);
+  if (!processed) {
     // All deltas are free - no constraint, error is always 0
     return { error: 0, x: 1, freeValues: targetDeltas.slice() };
   }
-  
-  // Determine the range of intervals to include (excluding leading/trailing free)
-  const firstIncludedInterval = segments[firstFixedIdx].start;
-  const lastIncludedInterval = segments[lastFixedIdx].end;
-  
-  // Build the chord starting from the appropriate base note
-  // If we trimmed leading intervals, we need to rebase everything
-  let baseRatio = 1.0;
-  if (firstIncludedInterval > 0) {
-    baseRatio = intervalsFromRoot[firstIncludedInterval - 1];
-  }
-  
-  // For the included range, we need CUMULATIVE ratios from the (possibly rebased) root
-  // The least-squares formula uses f_i = (x + D_i)/x where f_i is the ratio to root
-  const includedRatios = [];
-  for (let i = firstIncludedInterval; i <= lastIncludedInterval; i++) {
-    const cumulativeRatio = intervalsFromRoot[i] / baseRatio;
-    includedRatios.push(cumulativeRatio);
-  }
-  
-  const includedTargetDeltas = targetDeltas.slice(firstIncludedInterval, lastIncludedInterval + 1);
-  const includedIsFree = isFree.slice(firstIncludedInterval, lastIncludedInterval + 1);
+
+  const {
+    includedRatios,
+    includedTargetDeltas,
+    includedIsFree,
+    interiorFreeSegments
+  } = processed;
   const includedN = includedRatios.length;
   
   // NORMALIZATION: Scale the delta signature to improve numerical conditioning
@@ -1152,19 +1254,8 @@ function calculatePDRError() {
   
   // Scale all target deltas
   const scaledTargetDeltas = includedTargetDeltas.map(d => d * deltaScaleFactor);
-  
-  // Re-segment the included range
-  const includedSegments = [];
-  segStart = 0;
-  for (let i = 0; i <= includedN; i++) {
-    if (i === includedN || (i > 0 && includedIsFree[i] !== includedIsFree[i-1])) {
-      includedSegments.push({ start: segStart, end: i - 1, isFree: includedIsFree[segStart] });
-      segStart = i;
-    }
-  }
-  
-  // Get indices of free segments (now all are interior)
-  const interiorFreeSegments = includedSegments.filter(s => s.isFree);
+
+  // Number of free variables to optimize
   const numFreeVars = interiorFreeSegments.length;
   
   // Build the optimization problem for L-BFGS-B
@@ -1196,14 +1287,50 @@ function calculatePDRError() {
         cumulative.push(sum);
       }
       
-      // Calculate sum of squared errors
+      // Calculate sum of squared errors based on domain and model
       let errorSq = 0;
+
+      // Build target ratios: targetRatios[i] = (x + cumulative[i]) / x = 1 + cumulative[i]/x
+      const targetRatios = [1]; // Root
       for (let i = 0; i < includedN; i++) {
-        const predicted = (x + cumulative[i]) / x;
-        const diff = predicted - includedRatios[i];
-        errorSq += diff * diff;
+        targetRatios.push((x + cumulative[i]) / x);
       }
-      
+
+      if (model === "rooted") {
+        // Rooted: compare each interval from root
+        for (let i = 0; i < includedN; i++) {
+          const target = targetRatios[i + 1]; // targetRatios[0] is root = 1
+          const actual = includedRatios[i];
+
+          if (domain === "linear") {
+            const diff = target - actual;
+            errorSq += diff * diff;
+          } else { // log
+            const diff = Math.log(target) - Math.log(actual); // in nepers
+            errorSq += diff * diff;
+          }
+        }
+      } else { // pairwise
+        // Pairwise: compare all interval pairs
+        const allRatios = [1, ...includedRatios];
+        const allTargetRatios = targetRatios;
+
+        for (let i = 0; i < allTargetRatios.length; i++) {
+          for (let j = i + 1; j < allTargetRatios.length; j++) {
+            const targetInterval = allTargetRatios[j] / allTargetRatios[i];
+            const actualInterval = allRatios[j] / allRatios[i];
+
+            if (domain === "linear") {
+              const diff = targetInterval - actualInterval;
+              errorSq += diff * diff;
+            } else { // log
+              const diff = Math.log(targetInterval) - Math.log(actualInterval); // in nepers
+              errorSq += diff * diff;
+            }
+          }
+        }
+      }
+
       return errorSq;
     };
   }
@@ -1318,8 +1445,13 @@ function calculatePDRError() {
     }
   }
   
-  const finalError = Math.sqrt(Math.abs(trueErrorSquared));
-  
+  let finalError = Math.sqrt(Math.abs(trueErrorSquared));
+
+  // Convert to cents if logarithmic
+  if (domain === "log") {
+    finalError = finalError * (1200 / Math.LN2); // nepers to cents
+  }
+
   // Additional validation
   if (isNaN(finalError) || !isFinite(finalError)) {
     /*
@@ -1352,8 +1484,12 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { solvePDRChord, BoundedLBFGS, LBFGS, calculatePDRError };
 }
 
-// Least-squares error function that handles PDR
+// Least-squares error function that handles both FDR and PDR
 function calculateLeastSquaresError() {
+  // Read domain and model from selectors
+  const domain = document.getElementById("error-domain").value;
+  const model = document.getElementById("error-model").value;
+
   // Check if any deltas are free
   let hasFreeDeltas = false;
   for (let i = 1; i <= currentIntervalCount; i++) {
@@ -1363,9 +1499,9 @@ function calculateLeastSquaresError() {
       break;
     }
   }
-  
+
   if (hasFreeDeltas) {
-    const result = calculatePDRError();
+    const result = calculatePDRError(domain, model);
     if (result === null) {
       document.getElementById("ls-error").textContent = "undefined";
     } else {
@@ -1380,7 +1516,7 @@ function calculateLeastSquaresError() {
         if (isFree) {
           // For free deltas, show the optimized value
           if (freeIdx < result.freeValues.length) {
-            targetDeltas.push(result.freeValues[freeIdx].toFixed(2) + "?");
+            targetDeltas.push(result.freeValues[freeIdx].toFixed(6) + "?");
             freeIdx++;
           } else {
             targetDeltas.push("?");
@@ -1418,15 +1554,16 @@ function calculateLeastSquaresError() {
         targetRatiosForViz.push(1 + cumDelta / result.x);
       }
       
-      let display = result.error.toFixed(6) + ` (x = ${result.x.toFixed(4)}, target: ${deltaSignature})`;
+      const errorStr = result.error.toFixed(6) + (domain === "log" ? " ¢" : "");
+      let display = errorStr + ` (x = ${result.x.toFixed(4)}, target: ${deltaSignature})`;
       document.getElementById("ls-error").textContent = display;
       
       // Update visualization to show target
       updateVisualization();
     }
   } else {
-    // No free deltas, use original FDR calculation
-    calculateLeastSquaresErrorForFDR();
+    // No free deltas, use FDR calculation
+    calculateFDRError(domain, model);
   }
 }
 

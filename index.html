@@ -68,7 +68,19 @@
       </div>
       <hr />
       <div id="error-display">
-        <strong>Error (rooted linear)</strong>
+        <strong>Error</strong>
+        <div style="margin: 6px 0;">
+          <label for="error-domain">Domain:</label>
+          <select id="error-domain">
+            <option value="linear">Linear</option>
+            <option value="log" selected>Logarithmic</option>
+          </select>
+          <label for="error-model" style="margin-left: 10px;">Error model:</label>
+          <select id="error-model">
+            <option value="rooted">Rooted (from root)</option>
+            <option value="pairwise" selected>Pairwise (all intervals)</option>
+          </select>
+        </div>
         <button id="btn-calculate-error">Calculate</button>
         <button id="btn-clear-target">Clear target</button>
         <br/>
