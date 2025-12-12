@@ -796,7 +796,7 @@ function calculateFDRError(domain, model) {
   // Coarse grid search
   let bestX = xMin;
   let bestError = computeError(xMin);
-  const coarseSteps = 100;
+  const coarseSteps = 500;
   const coarseStep = (xMax - xMin) / coarseSteps;
 
   for (let i = 0; i <= coarseSteps; i++) {
@@ -811,7 +811,7 @@ function calculateFDRError(domain, model) {
   // Fine grid search around the best point
   xMin = Math.max(bestX - coarseStep, sumD / (avgRatio * 10));
   xMax = bestX + coarseStep;
-  const fineSteps = 100;
+  const fineSteps = 500;
   const fineStep = (xMax - xMin) / fineSteps;
 
   for (let i = 0; i <= fineSteps; i++) {
