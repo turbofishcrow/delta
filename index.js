@@ -762,7 +762,7 @@ function calculateFDRError(domain, model) {
           sumSquaredError += diff * diff;
         }
       }
-    } else { // pairwise
+    } else if (model === "pairwise") {
       // Pairwise: compare all interval pairs
       // Include the root (index 0) as ratio 1
       const allRatios = [1, ...ratios];
@@ -780,6 +780,23 @@ function calculateFDRError(domain, model) {
             const diff = Math.log(targetInterval) - Math.log(actualInterval); // in nepers
             sumSquaredError += diff * diff;
           }
+        }
+      }
+    } else if (model === "all-steps") {
+      // All-steps: compare only successive intervals
+      const allRatios = [1, ...ratios];
+      const allTargetRatios = targetRatios;
+
+      for (let i = 0; i < n; i++) {
+        const targetInterval = allTargetRatios[i + 1] / allTargetRatios[i];
+        const actualInterval = allRatios[i + 1] / allRatios[i];
+
+        if (domain === "linear") {
+          const diff = targetInterval - actualInterval;
+          sumSquaredError += diff * diff;
+        } else { // log
+          const diff = Math.log(targetInterval) - Math.log(actualInterval); // in nepers
+          sumSquaredError += diff * diff;
         }
       }
     }
@@ -1075,7 +1092,7 @@ function calculatePDRError(domain, model) {
             errorSq += diff * diff;
           }
         }
-      } else { // pairwise
+      } else if (model === "pairwise") {
         // Pairwise: compare all interval pairs
         const allRatios = [1, ...includedRatios];
         const allTargetRatios = targetRatios;
@@ -1092,6 +1109,23 @@ function calculatePDRError(domain, model) {
               const diff = Math.log(targetInterval) - Math.log(actualInterval); // in nepers
               errorSq += diff * diff;
             }
+          }
+        }
+      } else if (model === "all-steps") {
+        // All-steps: compare only successive intervals
+        const allRatios = [1, ...includedRatios];
+        const allTargetRatios = targetRatios;
+
+        for (let i = 0; i < includedN; i++) {
+          const targetInterval = allTargetRatios[i + 1] / allTargetRatios[i];
+          const actualInterval = allRatios[i + 1] / allRatios[i];
+
+          if (domain === "linear") {
+            const diff = targetInterval - actualInterval;
+            errorSq += diff * diff;
+          } else { // log
+            const diff = Math.log(targetInterval) - Math.log(actualInterval); // in nepers
+            errorSq += diff * diff;
           }
         }
       }
