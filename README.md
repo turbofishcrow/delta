@@ -92,20 +92,22 @@ To explore a just major chord (4:5:6) as a delta-rational chord:
 6. Click Calculate — the error should be 0 (or very close)
 7. Click Play to hear the chord
 
-## Technical Notes
-
-- The least-squares error formula follows the methodology described in the [Xenharmonic Wiki article](https://en.xen.wiki/w/Delta-rational_chord)
-- All calculations use standard equal temperament cents (1200 cents = octave = frequency ratio of 2)
-
-### Error Computation
+## Error Computation: Technical Notes
 
 - **FDR (Fully Delta-Rational):** When no deltas are marked as free, a closed-form solution is used.
-- **PDR (Single free variable)**: Uses a grid search over the root real-valued harmonic `x`, computing the optimal free variable value analytically for each `x`. This avoids local minima that can occur with alternating optimization.
-- **PDR (Multiple free variables)**: Uses alternating optimization, iterating between:
-  1. Fixing free variables and solving for optimal `x` (closed form)
-  2. Fixing `x` and solving for optimal free variables (closed form)
+- **PDR (Partially Delta-Rational):** Uses L-BFGS-B optimization to minimize the sum of squared errors over all variables simultaneously. The optimization:
+  - Solves for the root real-valued harmonic `x` (constrained to `x > 0`)
+  - Solves for all free delta variables (unbounded)
+  - Uses multiple starting points for robustness
+  - Employs a log-barrier method to enforce the positivity constraint on `x`
+  - Scales the delta signature when `x` is guessed to be small
 
-The error formula minimizes the sum of squared differences between the target DR chord ratios and the actual chord ratios in the linear (frequency) domain.
+The error formula minimizes the sum of squared differences between the target DR chord ratios and the actual chord ratios in the linear (frequency) domain:
+```
+minimize √(Σᵢ ((x + Dᵢ)/x - fᵢ)²)
+```
+
+where `fᵢ` are the cumulative frequency ratios from the root, `Dᵢ` are the cumulative deltas, and `x` is the base frequency of the chord in the same units as the deltas.
 
 ## Running Locally
 

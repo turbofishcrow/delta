@@ -583,6 +583,7 @@ updateFromRatio(1);
 
 const btnAddInterval = document.getElementById("btn-add-interval");
 const btnRemoveInterval = document.getElementById("btn-remove-interval");
+const btnClearIntervals = document.getElementById("btn-clear-intervals");
 
 btnAddInterval.addEventListener("click", () => {
   currentIntervalCount++;
@@ -653,6 +654,15 @@ btnRemoveInterval.addEventListener("click", () => {
     currentIntervalCount--;
     refreshChordIfPlaying();
   }
+});
+
+btnClearIntervals.addEventListener("click", () => {
+  while (currentIntervalCount > 1) {
+    const intervalTable = document.getElementById("intervals");
+    intervalTable.removeChild(intervalTable.lastElementChild);
+    currentIntervalCount--;
+  }
+  refreshChordIfPlaying();
 });
 
 // ============ Audio Control Event Listeners ============
@@ -764,21 +774,289 @@ function calculateLeastSquaresErrorForFDR() {
 }
 
 /**
- * Calculate PDR (Partially Delta-Rational) least-squares error using alternating optimization.
+ * Delta-Rational Chord Least-Squares Optimization
+ * Solves PDR chord approximation using L-BFGS with bound constraints
+ */
+
+// Simple L-BFGS implementation (unbounded)
+class LBFGS {
+  constructor(options = {}) {
+    this.historySize = options.historySize || 10;
+    this.maxIterations = options.maxIterations || 100;
+    this.tolerance = options.tolerance || 1e-6;
+  }
+
+  minimize(f, grad, x0) {
+    const n = x0.length;
+    let x = [...x0];
+    let fx = f(x);
+    let g = grad(x);
+    
+    const s_history = [];
+    const y_history = [];
+    const rho_history = [];
+    
+    for (let iter = 0; iter < this.maxIterations; iter++) {
+      // Check convergence
+      const gradNorm = Math.sqrt(g.reduce((sum, gi) => sum + gi * gi, 0));
+      if (gradNorm < this.tolerance) {
+        return { x, fx, iterations: iter, success: true };
+      }
+      
+      // Compute search direction using two-loop recursion
+      const q = [...g];
+      const alpha = [];
+      
+      for (let i = s_history.length - 1; i >= 0; i--) {
+        alpha[i] = rho_history[i] * dot(s_history[i], q);
+        for (let j = 0; j < n; j++) {
+          q[j] -= alpha[i] * y_history[i][j];
+        }
+      }
+      
+      // Initial Hessian approximation (scaled identity)
+      let gamma = 1;
+      if (s_history.length > 0) {
+        const k = s_history.length - 1;
+        gamma = dot(s_history[k], y_history[k]) / dot(y_history[k], y_history[k]);
+      }
+      
+      const z = q.map(qi => gamma * qi);
+      
+      for (let i = 0; i < s_history.length; i++) {
+        const beta = rho_history[i] * dot(y_history[i], z);
+        for (let j = 0; j < n; j++) {
+          z[j] += s_history[i][j] * (alpha[i] - beta);
+        }
+      }
+      
+      const p = z.map(zi => -zi); // Search direction
+      
+      // Line search (simple backtracking)
+      let stepSize = 1.0;
+      const c1 = 1e-4;
+      const rho_ls = 0.5;
+      const maxLineSearch = 20;
+      
+      let x_new = x.map((xi, i) => xi + stepSize * p[i]);
+      let fx_new = f(x_new);
+      
+      for (let ls = 0; ls < maxLineSearch; ls++) {
+        if (fx_new <= fx + c1 * stepSize * dot(g, p)) {
+          break;
+        }
+        stepSize *= rho_ls;
+        x_new = x.map((xi, i) => xi + stepSize * p[i]);
+        fx_new = f(x_new);
+      }
+      
+      // Update history
+      const s = x_new.map((xi, i) => xi - x[i]);
+      const g_new = grad(x_new);
+      const y = g_new.map((gi, i) => gi - g[i]);
+      
+      const sy = dot(s, y);
+      if (sy > 1e-10) {
+        s_history.push(s);
+        y_history.push(y);
+        rho_history.push(1 / sy);
+        
+        if (s_history.length > this.historySize) {
+          s_history.shift();
+          y_history.shift();
+          rho_history.shift();
+        }
+      }
+      
+      x = x_new;
+      fx = fx_new;
+      g = g_new;
+    }
+    
+    return { x, fx, iterations: this.maxIterations, success: false };
+  }
+}
+
+// Helper: dot product
+function dot(a, b) {
+  return a.reduce((sum, ai, i) => sum + ai * b[i], 0);
+}
+
+// Numerical gradient computation
+function numericalGradient(f, x, eps = 1e-8) {
+  const grad = new Array(x.length);
+  for (let i = 0; i < x.length; i++) {
+    const x_plus = [...x];
+    const x_minus = [...x];
+    x_plus[i] += eps;
+    x_minus[i] -= eps;
+    grad[i] = (f(x_plus) - f(x_minus)) / (2 * eps);
+  }
+  return grad;
+}
+
+// Box constraint transformation using log-barrier
+class BoundedLBFGS {
+  constructor(options = {}) {
+    this.lbfgs = new LBFGS(options);
+    this.barrierWeight = options.barrierWeight || 1e-6;
+  }
+
+  minimize(f, bounds, x0) {
+    // Transform to unbounded problem using log barrier
+    const transformedF = (x) => {
+      let penalty = 0;
+      for (let i = 0; i < x.length; i++) {
+        const [lower, upper] = bounds[i];
+        if (lower !== null && x[i] <= lower) {
+          return Infinity;
+        }
+        if (upper !== null && x[i] >= upper) {
+          return Infinity;
+        }
+        
+        // Log barrier penalties
+        if (lower !== null) {
+          penalty -= this.barrierWeight * Math.log(x[i] - lower);
+        }
+        if (upper !== null) {
+          penalty -= this.barrierWeight * Math.log(upper - x[i]);
+        }
+      }
+      return f(x) + penalty;
+    };
+    
+    const grad = (x) => numericalGradient(transformedF, x);
+    
+    return this.lbfgs.minimize(transformedF, grad, x0);
+  }
+}
+
+/**
+ * Solve PDR chord optimization problem
+ * @param {Array} deltas - Array with numbers for fixed deltas, null for free variables
+ * @param {Array} fValues - Target frequency ratios [f1, f2, f3, ...]
+ * @param {Object} options - Optimization options
+ * @returns {Object} Solution with x, freeDeltas, error, success
+ */
+function solvePDRChord(deltas, fValues, options = {}) {
+  const numFree = deltas.filter(d => d === null).length;
+  
+  // Build error function
+  function errorFunction(params) {
+    const x = params[0];
+    const freeVars = params.slice(1);
+    
+    // Build cumulative deltas
+    const D = [];
+    let cumsum = 0;
+    let freeIdx = 0;
+    
+    for (const delta of deltas) {
+      if (delta === null) {
+        cumsum += freeVars[freeIdx++];
+      } else {
+        cumsum += delta;
+      }
+      D.push(cumsum);
+    }
+    
+    // Sum of squared errors
+    let error = 0;
+    for (let i = 0; i < fValues.length; i++) {
+      const predicted = (x + D[i]) / x;
+      const diff = predicted - fValues[i];
+      error += diff * diff;
+    }
+    
+    return error;
+  }
+  
+  // Set up bounds: x > 0, free variables unbounded
+  const bounds = [[0.01, null], ...Array(numFree).fill([null, null])];
+  
+  // Try multiple starting points
+  const startingPoints = generateStartingPoints(fValues, deltas, numFree, options.numStarts || 3);
+  
+  let bestResult = null;
+  let bestError = Infinity;
+  
+  const optimizer = new BoundedLBFGS({
+    historySize: options.historySize || 10,
+    maxIterations: options.maxIterations || 100,
+    tolerance: options.tolerance || 1e-8,
+    barrierWeight: options.barrierWeight || 1e-6
+  });
+  
+  for (const x0 of startingPoints) {
+    try {
+      const result = optimizer.minimize(errorFunction, bounds, x0);
+      if (result.fx < bestError) {
+        bestError = result.fx;
+        bestResult = result;
+      }
+    } catch (e) {
+      console.warn('Optimization failed for starting point:', x0, e);
+    }
+  }
+  
+  if (!bestResult) {
+    return { success: false, error: 'All optimizations failed' };
+  }
+  
+  return {
+    x: bestResult.x[0],
+    freeDeltas: bestResult.x.slice(1),
+    error: Math.sqrt(bestResult.fx),
+    iterations: bestResult.iterations,
+    success: bestResult.success
+  };
+}
+
+/**
+ * Generate smart initial guesses
+ */
+function generateStartingPoints(fValues, deltas, numFree, numStarts) {
+  const points = [];
+  
+  // Estimate x from first interval
+  const fixedSum = deltas.reduce((sum, d) => sum + (d || 0), 0);
+  const avgF = fValues.reduce((sum, f) => sum + f, 0) / fValues.length;
+  
+  const xEstimates = [
+    1.0,
+    fValues[0],
+    avgF,
+    (fValues[0] + fValues[fValues.length - 1]) / 2
+  ];
+  
+  for (let i = 0; i < numStarts; i++) {
+    const x = xEstimates[i % xEstimates.length];
+    
+    // Estimate free deltas from spacing
+    const spacing = (fValues[fValues.length - 1] - fValues[0]) / (deltas.length + 1);
+    const freeEstimate = spacing * x;
+    
+    points.push([x, ...Array(numFree).fill(freeEstimate)]);
+  }
+  
+  return points;
+}
+
+/**
+ * Calculate PDR (Partially Delta-Rational) least-squares error.
+ * Rewritten to use L-BFGS-B optimization.
  * 
- * For a chord 1:f1:f2:...:fn with target delta signature where some deltas are free (+?),
- * we optimize over x (the root real-valued harmonic) and the free delta variables.
- * 
- * The alternating method:
- * 1. Fix free variables, solve for optimal x (closed form)
- * 2. Fix x, solve for optimal free variables (closed form)
- * 3. Repeat until convergence
+ * This function expects to be called from a UI context where:
+ * - getBaseFrequency() returns the base frequency
+ * - currentIntervalCount is the number of intervals
+ * - DOM elements exist with IDs: input-interval-{i}-cents, input-interval-{i}-target-delta, input-interval-{i}-free
  */
 function calculatePDRError() {
   const baseFreq = getBaseFrequency();
   
-  // Get the chord data
-  const ratios = [];      // f_i values
+  // Get the chord data - intervals from root
+  const intervalsFromRoot = []; // Absolute intervals from root in ratio form
   const targetDeltas = []; // δ_i values (will be optimized if free)
   const isFree = [];       // whether each delta is free
   
@@ -798,18 +1076,17 @@ function calculatePDRError() {
     // Treat as free if checkbox is checked OR if target delta is invalid/empty
     const free = checkboxFree || isNaN(targetDelta);
     
-    const f_i = centsToRatio(cents);
-    ratios.push(f_i);
+    const ratio = centsToRatio(cents);
+    intervalsFromRoot.push(ratio);
     targetDeltas.push(isNaN(targetDelta) ? 1 : targetDelta);
     isFree.push(free);
   }
   
-  const n = ratios.length;
+  const n = intervalsFromRoot.length;
   if (n === 0) return null;
   
   // Group consecutive free deltas into segments
-  // Each segment of consecutive free deltas shares one variable
-  const segments = []; // {start, end, isFree}
+  const segments = [];
   let segStart = 0;
   for (let i = 0; i <= n; i++) {
     if (i === n || (i > 0 && isFree[i] !== isFree[i-1])) {
@@ -818,7 +1095,7 @@ function calculatePDRError() {
     }
   }
   
-  // Count free segments (excluding leading and trailing free segments)
+  // Find first and last fixed segments (trim leading/trailing free)
   let firstFixedIdx = segments.findIndex(s => !s.isFree);
   let lastFixedIdx = segments.length - 1 - [...segments].reverse().findIndex(s => !s.isFree);
   
@@ -831,22 +1108,48 @@ function calculatePDRError() {
   const firstIncludedInterval = segments[firstFixedIdx].start;
   const lastIncludedInterval = segments[lastFixedIdx].end;
   
-  // Filter ratios and deltas to only include the interior range
-  // When trimming leading free intervals, we need to rebase the ratios
-  // relative to the new "root" (the interval just before the first included one)
-  let includedRatios;
-  if (firstIncludedInterval === 0) {
-    // No leading free intervals, use ratios as-is
-    includedRatios = ratios.slice(firstIncludedInterval, lastIncludedInterval + 1);
-  } else {
-    // Rebase ratios relative to the previous interval (which becomes the new root)
-    const newBaseRatio = ratios[firstIncludedInterval - 1];
-    includedRatios = ratios.slice(firstIncludedInterval, lastIncludedInterval + 1)
-      .map(r => r / newBaseRatio);
+  // Build the chord starting from the appropriate base note
+  // If we trimmed leading intervals, we need to rebase everything
+  let baseRatio = 1.0;
+  if (firstIncludedInterval > 0) {
+    baseRatio = intervalsFromRoot[firstIncludedInterval - 1];
   }
+  
+  // For the included range, we need CUMULATIVE ratios from the (possibly rebased) root
+  // The least-squares formula uses f_i = (x + D_i)/x where f_i is the ratio to root
+  const includedRatios = [];
+  for (let i = firstIncludedInterval; i <= lastIncludedInterval; i++) {
+    const cumulativeRatio = intervalsFromRoot[i] / baseRatio;
+    includedRatios.push(cumulativeRatio);
+  }
+  
   const includedTargetDeltas = targetDeltas.slice(firstIncludedInterval, lastIncludedInterval + 1);
   const includedIsFree = isFree.slice(firstIncludedInterval, lastIncludedInterval + 1);
   const includedN = includedRatios.length;
+  
+  // NORMALIZATION: Scale the delta signature to improve numerical conditioning
+  // We want x to be in a reasonable range (e.g., around 1-10) rather than very small
+  // Since delta signatures are scale-invariant, we can multiply all deltas by a constant
+  // 
+  // Strategy: Estimate what x would be, then scale deltas so x ≈ a target value (e.g., 5)
+  const targetX = 5.0; // Target x value after scaling
+  
+  // Estimate unscaled x from first fixed delta (if available)
+  let estimatedUnscaledX = 1.0;
+  const firstFixedDeltaIdx = includedIsFree.findIndex(free => !free);
+  if (firstFixedDeltaIdx !== -1) {
+    const firstDelta = includedTargetDeltas[firstFixedDeltaIdx];
+    const firstRatio = includedRatios[firstFixedDeltaIdx];
+    if (firstRatio > 1 && firstDelta > 0) {
+      estimatedUnscaledX = firstDelta / (firstRatio - 1);
+    }
+  }
+  
+  // Calculate scaling factor: we want estimatedUnscaledX * scale = targetX
+  const deltaScaleFactor = targetX / Math.max(0.1, estimatedUnscaledX);
+  
+  // Scale all target deltas
+  const scaledTargetDeltas = includedTargetDeltas.map(d => d * deltaScaleFactor);
   
   // Re-segment the included range
   const includedSegments = [];
@@ -858,230 +1161,193 @@ function calculatePDRError() {
     }
   }
   
-  // Get indices of free segments (now all are interior since we trimmed leading/trailing)
+  // Get indices of free segments (now all are interior)
   const interiorFreeSegments = includedSegments.filter(s => s.isFree);
-  
   const numFreeVars = interiorFreeSegments.length;
   
-  // Initialize free variable values from current target deltas
-  let freeVarValues = interiorFreeSegments.map(seg => {
-    // Sum of deltas in this segment
-    let sum = 0;
-    for (let i = seg.start; i <= seg.end; i++) {
-      sum += includedTargetDeltas[i];
-    }
-    return sum;
-  });
+  // Build the optimization problem for L-BFGS-B
+  // Variables: [x, y1, y2, ..., yK] where K = numFreeVars
+  // Each yi represents the TOTAL delta sum for free segment i
   
-  // Helper: compute cumulative deltas given current free variable values
-  function getCumulativeDeltas(freeVals) {
-    const deltas = includedTargetDeltas.slice();
-    
-    // Update free segments with their optimized values
-    interiorFreeSegments.forEach((seg, idx) => {
-      const segLength = seg.end - seg.start + 1;
-      const valPerDelta = freeVals[idx] / segLength;
-      for (let i = seg.start; i <= seg.end; i++) {
-        deltas[i] = valPerDelta;
-      }
-    });
-    
-    // Compute cumulative sums
-    const cumulative = [];
-    let sum = 0;
-    for (let i = 0; i < includedN; i++) {
-      sum += deltas[i];
-      cumulative.push(sum);
-    }
-    return cumulative;
-  }
-  
-  // Helper: compute optimal x given cumulative deltas
-  function computeOptimalX(cumDeltas) {
-    const sumD = cumDeltas.reduce((a, b) => a + b, 0);
-    const sumF = includedRatios.reduce((a, b) => a + b, 0);
-    const denom = -includedN + sumF;
-    if (Math.abs(denom) < 1e-10) return null;
-    return sumD / denom;
-  }
-  
-  // Helper: compute error given x and cumulative deltas
-  function computeError(x, cumDeltas) {
-    let sumSq = 0;
-    for (let i = 0; i < includedN; i++) {
-      const err = 1 + cumDeltas[i] / x - includedRatios[i];
-      sumSq += err * err;
-    }
-    return Math.sqrt(sumSq);
-  }
-  
-  // Helper: compute optimal free variable given x (for a single free segment)
-  function computeOptimalFreeVar(segIdx, x, currentFreeVals) {
-    const seg = interiorFreeSegments[segIdx];
-    const segLength = seg.end - seg.start + 1;
-    
-    // For a free segment spanning indices [seg.start, seg.end], we have one variable y
-    // representing the TOTAL delta for the segment. Each individual delta = y/segLength.
-    //
-    // The contribution of y to cumulative delta D_i:
-    // - For i < seg.start: 0
-    // - For seg.start <= i <= seg.end: (i - seg.start + 1) * (y / segLength)
-    // - For i > seg.end: y (full contribution)
-    //
-    // Let c_i = coefficient of y in D_i
-    // Error = sum_i (1 + (baseCumDeltas[i] + c_i * y)/x - f_i)^2
-    // Let a_i = 1 + baseCumDeltas[i]/x - f_i
-    // Error = sum_i (a_i + c_i * y/x)^2
-    // d/dy = sum_i 2 * (a_i + c_i * y/x) * (c_i / x) = 0
-    // sum_i (c_i * a_i + c_i^2 * y/x) = 0
-    // y = -x * sum_i(c_i * a_i) / sum_i(c_i^2)
-    
-    // Get current cumulative deltas without this segment's contribution
-    const testFreeVals = currentFreeVals.slice();
-    testFreeVals[segIdx] = 0;
-    const baseCumDeltas = getCumulativeDeltas(testFreeVals);
-    
-    let sumCA = 0;   // sum of c_i * a_i
-    let sumC2 = 0;   // sum of c_i^2
-    
-    for (let i = 0; i < includedN; i++) {
-      let c_i;
-      if (i < seg.start) {
-        c_i = 0;
-      } else if (i <= seg.end) {
-        c_i = (i - seg.start + 1) / segLength;
-      } else {
-        c_i = 1;
+  function buildErrorFunction() {
+    return function(params) {
+      const x = params[0];
+      const freeVals = params.slice(1);
+      
+      // Build cumulative deltas using SCALED deltas
+      const deltas = scaledTargetDeltas.slice();
+      
+      // Update free segments with their values
+      interiorFreeSegments.forEach((seg, idx) => {
+        const segLength = seg.end - seg.start + 1;
+        const valPerDelta = freeVals[idx] / segLength;
+        for (let i = seg.start; i <= seg.end; i++) {
+          deltas[i] = valPerDelta;
+        }
+      });
+      
+      // Compute cumulative sums
+      const cumulative = [];
+      let sum = 0;
+      for (let i = 0; i < includedN; i++) {
+        sum += deltas[i];
+        cumulative.push(sum);
       }
       
-      if (c_i > 0) {
-        const a_i = 1 + baseCumDeltas[i] / x - includedRatios[i];
-        sumCA += c_i * a_i;
-        sumC2 += c_i * c_i;
-      }
-    }
-    
-    if (sumC2 < 1e-10) return currentFreeVals[segIdx];
-    
-    const optimalY = -x * sumCA / sumC2;
-    return optimalY; // Allow any value (can be negative for some chord shapes)
-  }
-  
-  // Alternating optimization
-  const maxIter = 1000;
-  const tolerance = 1e-12;
-  let prevError = Infinity;
-  let x = 1;
-  
-  for (let iter = 0; iter < maxIter; iter++) {
-    // Step 1: Fix free variables, compute optimal x
-    const cumDeltas = getCumulativeDeltas(freeVarValues);
-    x = computeOptimalX(cumDeltas);
-    
-    if (x === null || x <= 0) {
-      return null;
-    }
-    
-    // Step 2: Fix x, compute optimal free variables
-    for (let j = 0; j < numFreeVars; j++) {
-      freeVarValues[j] = computeOptimalFreeVar(j, x, freeVarValues);
-    }
-    
-    // Check convergence
-    const newCumDeltas = getCumulativeDeltas(freeVarValues);
-    const error = computeError(x, newCumDeltas);
-    
-    if (Math.abs(prevError - error) < tolerance) {
-      break;
-    }
-    prevError = error;
-  }
-  
-  const finalCumDeltas = getCumulativeDeltas(freeVarValues);
-  const finalError = computeError(x, finalCumDeltas);
-  
-  // For single free variable, use grid search over x (more reliable than alternating)
-  if (numFreeVars === 1) {
-    const seg = interiorFreeSegments[0];
-    const segLength = seg.end - seg.start + 1;
-    
-    // Compute coefficients c_i for each interval
-    const coeffs = [];
-    for (let i = 0; i < includedN; i++) {
-      let c_i;
-      if (i < seg.start) {
-        c_i = 0;
-      } else if (i <= seg.end) {
-        c_i = (i - seg.start + 1) / segLength;
-      } else {
-        c_i = 1;
-      }
-      coeffs.push(c_i);
-    }
-    
-    // Base cumulative deltas with y=0
-    const baseCumDeltas = getCumulativeDeltas([0]);
-    
-    // For a given x, optimal y = -x * sum(c_i * a_i) / sum(c_i^2)
-    // where a_i = 1 + baseCumDeltas[i]/x - f_i
-    function computeOptimalY(testX) {
-      let sumCA = 0;
-      let sumC2 = 0;
+      // Calculate sum of squared errors
+      let errorSq = 0;
       for (let i = 0; i < includedN; i++) {
-        if (coeffs[i] > 0) {
-          const a_i = 1 + baseCumDeltas[i] / testX - includedRatios[i];
-          sumCA += coeffs[i] * a_i;
-          sumC2 += coeffs[i] * coeffs[i];
-        }
+        const predicted = (x + cumulative[i]) / x;
+        const diff = predicted - includedRatios[i];
+        errorSq += diff * diff;
       }
-      if (sumC2 < 1e-10) return 1;
-      return -testX * sumCA / sumC2;
-    }
-    
-    function computeErrorForX(testX) {
-      const testY = computeOptimalY(testX);
-      const testCumDeltas = getCumulativeDeltas([testY]);
-      return computeError(testX, testCumDeltas);
-    }
-    
-    // Grid search over x
-    let bestError = Infinity;
-    let bestX = 1;
-    let bestY = 1;
-    
-    // Coarse search
-    for (let testX = 0.5; testX <= 20; testX += 0.1) {
-      const err = computeErrorForX(testX);
-      if (err < bestError) {
-        bestError = err;
-        bestX = testX;
-      }
-    }
-    
-    // Fine search around best
-    for (let testX = Math.max(0.1, bestX - 1); testX <= bestX + 1; testX += 0.001) {
-      const err = computeErrorForX(testX);
-      if (err < bestError) {
-        bestError = err;
-        bestX = testX;
-      }
-    }
-    
-    // Ultra-fine search
-    for (let testX = Math.max(0.01, bestX - 0.05); testX <= bestX + 0.05; testX += 0.00001) {
-      const err = computeErrorForX(testX);
-      if (err < bestError) {
-        bestError = err;
-        bestX = testX;
-      }
-    }
-    
-    bestY = computeOptimalY(bestX);
-    
-    return { error: bestError, x: bestX, freeValues: [bestY] };
+      
+      return errorSq;
+    };
   }
   
-  return { error: finalError, x: x, freeValues: freeVarValues };
+  // Build initial guess (using scaled deltas)
+  // For a chord like 1:f1:f2:...:fn approximating x:(x+d1):(x+d1+d2):...
+  // We have f_i ≈ (x + D_i) / x where D_i is cumulative delta
+  // A good initial guess for x: use the first ratio and first delta
+  // f_1 ≈ (x + delta_1) / x  =>  x ≈ delta_1 / (f_1 - 1)
+  
+  let initialX = targetX; // Start near our target
+  if (scaledTargetDeltas.length > 0 && !includedIsFree[0]) {
+    const firstDelta = scaledTargetDeltas[0];
+    const firstRatio = includedRatios[0];
+    if (firstRatio > 1 && firstDelta > 0) {
+      initialX = firstDelta / (firstRatio - 1);
+    }
+  }
+  
+  // Fallback if the above doesn't work
+  if (initialX <= 0 || !isFinite(initialX)) {
+    initialX = targetX;
+  }
+  
+  const initialFreeVals = interiorFreeSegments.map(seg => {
+    // For each free segment, estimate the delta sum
+    // Based on the spacing of ratios in that segment
+    const segStart = seg.start;
+    const segEnd = seg.end;
+    const segLength = segEnd - segStart + 1;
+    
+    // Estimate: if ratios grow from f_start to f_end, 
+    // cumulative delta changes by approximately x * (f_end - f_start)
+    let estimatedDeltaSum = 1.0 * segLength * deltaScaleFactor; // Default, scaled
+    
+    if (segEnd < includedN - 1) {
+      const ratioBefore = segStart > 0 ? includedRatios[segStart - 1] : 1;
+      const ratioAfter = includedRatios[segEnd + 1];
+      estimatedDeltaSum = initialX * (ratioAfter - ratioBefore) * 0.5;
+    }
+    
+    return Math.max(0.1, estimatedDeltaSum);
+  });
+  
+  const initialParams = [initialX, ...initialFreeVals];
+  
+  // Set up bounds: x > 0.01, free variables unbounded
+  // Use a very small lower bound to avoid barrier issues near optimal x
+  const bounds = [[1e-6, null], ...Array(numFreeVars).fill([null, null])];
+  
+  // Run optimization
+  const errorFn = buildErrorFunction();
+  const optimizer = new BoundedLBFGS({
+    historySize: 10,
+    maxIterations: 200,
+    tolerance: 1e-10,
+    barrierWeight: 1e-10  // Very small barrier weight to minimize interference
+  });
+  
+  let bestResult = null;
+  let bestError = Infinity;
+  
+  // Try multiple starting points for robustness
+  const startingPoints = [
+    initialParams,
+    [targetX, ...initialFreeVals],
+    [targetX * 0.5, ...initialFreeVals.map(v => v * 0.5)],
+    [targetX * 2.0, ...initialFreeVals.map(v => v * 2.0)],
+  ];
+  
+  for (const x0 of startingPoints) {
+    try {
+      const result = optimizer.minimize(errorFn, bounds, x0);
+      if (result.fx < bestError && !isNaN(result.fx)) {
+        bestError = result.fx;
+        bestResult = result;
+      }
+    } catch (e) {
+      console.warn('Optimization failed for starting point:', e);
+    }
+  }
+  
+  if (!bestResult || !bestResult.success || isNaN(bestResult.fx)) {
+    console.warn('L-BFGS-B optimization did not converge or produced NaN');
+    console.warn('Best result:', bestResult);
+    console.warn('Included ratios:', includedRatios);
+    console.warn('Included deltas:', includedTargetDeltas);
+    console.warn('Free segments:', interiorFreeSegments);
+    return null;
+  }
+  
+  const finalX = bestResult.x[0];
+  const finalFreeVals = bestResult.x.slice(1);
+  
+  // UNSCALE the results: both x and free deltas were optimized with scaled deltas
+  // To get back to original scale, we need to unscale x by dividing by the scale factor
+  // (since x scales inversely with delta scaling: if deltas × k, then x ÷ k)
+  const unscaledX = finalX / deltaScaleFactor;
+  const unscaledFreeVals = finalFreeVals.map(v => v / deltaScaleFactor);
+  
+  // Handle numerical precision issues: if fx is very small and negative due to barrier penalty,
+  // recalculate the true error without the barrier
+  let trueErrorSquared = bestResult.fx;
+  if (trueErrorSquared < 0 && trueErrorSquared > -1e-6) {
+    // Recalculate without barrier penalty
+    trueErrorSquared = errorFn([finalX, ...finalFreeVals]);
+    
+    // If still negative (shouldn't happen), clamp to zero
+    if (trueErrorSquared < 0) {
+      console.warn('Error squared is negative after recalculation:', trueErrorSquared);
+      trueErrorSquared = 0;
+    }
+  }
+  
+  const finalError = Math.sqrt(Math.abs(trueErrorSquared));
+  
+  // Additional validation
+  if (isNaN(finalError) || !isFinite(finalError)) {
+    /*
+    console.warn('Final error is NaN or infinite');
+    console.warn('x (scaled):', finalX, 'x (unscaled):', unscaledX);
+    console.warn('free values (scaled):', finalFreeVals, 'unscaled:', unscaledFreeVals);
+    console.warn('bestResult.fx:', bestResult.fx);
+    console.warn('trueErrorSquared:', trueErrorSquared);
+    */
+    return null;
+  }
+  /*
+  console.log('PDR optimization succeeded:');
+  console.log('  Delta scale factor:', deltaScaleFactor);
+  console.log('  x (scaled) =', finalX, ', x (unscaled) =', unscaledX);
+  console.log('  free deltas (scaled) =', finalFreeVals);
+  console.log('  free deltas (unscaled) =', unscaledFreeVals);
+  console.log('  error =', finalError);
+  console.log('  error squared =', trueErrorSquared);
+  */
+  return { 
+    error: finalError, 
+    x: unscaledX,  // Return unscaled x
+    freeValues: unscaledFreeVals  // Return unscaled free deltas
+  };
+}
+
+// Export for use in other modules
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { solvePDRChord, BoundedLBFGS, LBFGS, calculatePDRError };
 }
 
 // Least-squares error function that handles PDR
