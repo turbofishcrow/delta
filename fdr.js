@@ -6,7 +6,7 @@
 /**
  * Calculate FDR error for a given chord and target deltas.
  *
- * @param {number[]} ratios - Frequency ratios from root [f1, f2, ...]
+ * @param {number[]} ratios - Frequency ratios from root [r1, r2, ...]
  * @param {number[]} targetDeltas - Target delta signature [d1, d2, ...]
  * @param {string} domain - "linear" or "log"
  * @param {string} model - "rooted", "pairwise", or "all-steps"
@@ -112,7 +112,7 @@ function calculateFDRError(ratios, targetDeltas, domain, model) {
 
   xMin = Math.max(bestX - coarseStep, sumD / (avgRatio * 10));
   xMax = bestX + coarseStep;
-  const fineSteps = 2000;
+  const fineSteps = 1000;
   const fineStep = (xMax - xMin) / fineSteps;
 
   for (let i = 0; i <= fineSteps; i++) {

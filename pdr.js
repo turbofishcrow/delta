@@ -165,11 +165,11 @@ class BoundedLBFGS {
 /**
  * Generate smart initial guesses
  */
-function generateStartingPoints(fValues, deltas, numFree, numStarts) {
+function generateStartingPoints(rValues, deltas, numFree, numStarts) {
   const points = [];
 
-  // For PDR chords, we have f_i = (x + D_i) / x
-  // So x = D_i / (f_i - 1)
+  // For PDR chords, we have r_i = (x + D_i) / x
+  // So x = D_i / (r_i - 1)
   // Try to estimate x from intervals with known deltas
 
   const xEstimates = [];
@@ -179,7 +179,7 @@ function generateStartingPoints(fValues, deltas, numFree, numStarts) {
   for (let i = 0; i < deltas.length; i++) {
     if (deltas[i] !== null) {
       cumulativeDelta += deltas[i];
-      const ratio = fValues[i];
+      const ratio = rValues[i];
       // ratio = (x + cumulativeDelta) / x
       // x * ratio = x + cumulativeDelta
       // x * (ratio - 1) = cumulativeDelta
@@ -194,11 +194,11 @@ function generateStartingPoints(fValues, deltas, numFree, numStarts) {
   }
 
   // Add some generic estimates
-  const avgF = fValues.reduce((sum, f) => sum + f, 0) / fValues.length;
+  const avgF = rValues.reduce((sum, f) => sum + f, 0) / rValues.length;
   xEstimates.push(1.0);
-  xEstimates.push(fValues[0]);
+  xEstimates.push(rValues[0]);
   xEstimates.push(avgF);
-  xEstimates.push((fValues[0] + fValues[fValues.length - 1]) / 2);
+  xEstimates.push((rValues[0] + rValues[rValues.length - 1]) / 2);
 
   // For each x estimate, estimate free deltas
   for (let i = 0; i < Math.max(numStarts, xEstimates.length); i++) {
@@ -210,9 +210,9 @@ function generateStartingPoints(fValues, deltas, numFree, numStarts) {
     let freeIdx = 0;
     for (let j = 0; j < deltas.length && freeIdx < numFree; j++) {
       if (deltas[j] === null) {
-        // f_j = (x + cumDelta + freeDelta) / x
-        // freeDelta = f_j * x - x - cumDelta
-        const freeDeltaEst = fValues[j] * x - x - cumDelta;
+        // r_j = (x + cumDelta + freeDelta) / x
+        // freeDelta = r_j * x - x - cumDelta
+        const freeDeltaEst = rValues[j] * x - x - cumDelta;
         freeDeltas.push(Math.max(0.1, freeDeltaEst)); // Ensure positive
         cumDelta += freeDeltaEst;
         freeIdx++;
@@ -235,14 +235,14 @@ function generateStartingPoints(fValues, deltas, numFree, numStarts) {
 /**
  * Solve PDR chord optimization problem
  * @param {Array} deltas - Array with numbers for fixed deltas, null for free variables
- * @param {Array} fValues - Target frequency ratios [f1, f2, f3, ...]
+ * @param {Array} rValues - Target frequency ratios [r1, r2, r3, ...]
  * @param {Object} options - Optimization options
  * @param {string} options.method - Optimizer to use: 'lbfgs' (default), 'nelder-mead', 'powell'
  * @param {string} options.domain - Error domain: 'linear' (default) or 'log'
  * @param {string} options.model - Error model: 'rooted' (default), 'pairwise', or 'all-steps'
  * @returns {Object} Solution with x, freeDeltas, error, success
  */
-function solvePDRChord(deltas, fValues, options = {}) {
+function solvePDRChord(deltas, rValues, options = {}) {
   const numFree = deltas.filter(d => d === null).length;
   const method = options.method || 'lbfgs';
   const domain = options.domain || 'linear';
@@ -275,9 +275,9 @@ function solvePDRChord(deltas, fValues, options = {}) {
 
     if (model === 'rooted') {
       // Rooted: compare each note to root
-      for (let i = 0; i < fValues.length; i++) {
+      for (let i = 0; i < rValues.length; i++) {
         const predicted = predictedRatios[i];
-        const actual = fValues[i];
+        const actual = rValues[i];
 
         if (domain === 'linear') {
           const diff = predicted - actual;
@@ -290,7 +290,7 @@ function solvePDRChord(deltas, fValues, options = {}) {
     } else if (model === 'pairwise') {
       // Pairwise: compare all interval pairs
       const allPredicted = [1, ...predictedRatios];
-      const allActual = [1, ...fValues];
+      const allActual = [1, ...rValues];
 
       for (let i = 0; i < allPredicted.length; i++) {
         for (let j = i + 1; j < allPredicted.length; j++) {
@@ -309,9 +309,9 @@ function solvePDRChord(deltas, fValues, options = {}) {
     } else if (model === 'all-steps') {
       // All-steps: compare only successive intervals
       const allPredicted = [1, ...predictedRatios];
-      const allActual = [1, ...fValues];
+      const allActual = [1, ...rValues];
 
-      for (let i = 0; i < fValues.length; i++) {
+      for (let i = 0; i < rValues.length; i++) {
         const predictedInterval = allPredicted[i + 1] / allPredicted[i];
         const actualInterval = allActual[i + 1] / allActual[i];
 
@@ -332,7 +332,7 @@ function solvePDRChord(deltas, fValues, options = {}) {
   const bounds = [[0.01, null], ...Array(numFree).fill([null, null])];
 
   // Try multiple starting points
-  const startingPoints = generateStartingPoints(fValues, deltas, numFree, options.numStarts || 3);
+  const startingPoints = generateStartingPoints(rValues, deltas, numFree, options.numStarts || 3);
 
   let bestResult = null;
   let bestError = Infinity;

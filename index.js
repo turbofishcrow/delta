@@ -682,193 +682,68 @@ document.getElementById("input-base-frequency").addEventListener("input", refres
 
 /**
  * Calculate the least-squares error for approximating a target delta signature (FDR).
+ * This is a UI wrapper that extracts data from the DOM and calls the pure FDR function from fdr.js.
  *
  * @param {string} domain - "linear" or "log" (logarithmic)
- * @param {string} model - "rooted" (from root) or "pairwise" (all intervals)
+ * @param {string} model - "rooted", "pairwise", or "all-steps"
  * @returns {Object|null} - {error, x, targetRatios, deltaSignature} or null if error
- *
- * Given a chord 1:f1:f2:...:fn and a target delta signature +δ1+δ2+...+δn,
- * we find the x that minimizes the sum of squared errors and return that error.
- *
- * For rooted models: optimal x = sum(D_i) / (-n + sum(f_i))
- * For pairwise models: same x formula works
- *
- * Linear domain: error in ratio units
- * Log domain: error in cents (converted from nepers)
  */
-function calculateFDRError(domain, model) {
-  const baseFreq = getBaseFrequency();
-  
-  // Get the chord as frequency ratios from root (f_1, f_2, ..., f_n)
+function calculateFDRErrorUI(domain, model) {
+  // Extract chord data from DOM
   const ratios = [];
   const targetDeltas = [];
-  
+
   for (let i = 1; i <= currentIntervalCount; i++) {
     const centsInput = document.getElementById(`input-interval-${i}-cents`);
     const targetDeltaInput = document.getElementById(`input-interval-${i}-target-delta`);
-    
+
     if (!centsInput || !targetDeltaInput) continue;
-    
+
     const cents = parseCents(centsInput.value);
     const targetDelta = parseFloat(targetDeltaInput.value);
-    
+
     if (isNaN(cents) || isNaN(targetDelta)) continue;
-    
-    // f_i is the frequency ratio from root
-    const f_i = centsToRatio(cents);
-    ratios.push(f_i);
+
+    const r_i = centsToRatio(cents);
+    ratios.push(r_i);
     targetDeltas.push(targetDelta);
   }
-  
-  const n = ratios.length;
-  if (n === 0) {
+
+  if (ratios.length === 0) {
     document.getElementById("ls-error").textContent = "—";
-    return;
+    return null;
   }
-  
-  // Calculate cumulative deltas D_i = δ_1 + δ_2 + ... + δ_i
+
+  // Call the pure FDR calculation function from fdr.js
+  const result = calculateFDRError(ratios, targetDeltas, domain, model);
+
+  // Compute target ratios for visualization
   const cumulativeDeltas = [];
   let cumSum = 0;
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < targetDeltas.length; i++) {
     cumSum += targetDeltas[i];
     cumulativeDeltas.push(cumSum);
   }
 
-  const sumD = cumulativeDeltas.reduce((a, b) => a + b, 0);
-
-  // Build error function that takes x and returns the sum of squared errors
-  function computeError(x) {
-    if (x <= 0) return Infinity;
-
-    // Compute target ratios from delta signature: f_i = 1 + D_i/x
-    const targetRatios = [1]; // Root
-    for (let i = 0; i < n; i++) {
-      targetRatios.push(1 + cumulativeDeltas[i] / x);
-    }
-
-    let sumSquaredError = 0;
-
-    if (model === "rooted") {
-      // Rooted: compare each interval from root
-      for (let i = 0; i < n; i++) {
-        const target = targetRatios[i + 1]; // targetRatios[0] is root = 1
-        const actual = ratios[i];
-
-        if (domain === "linear") {
-          const diff = target - actual;
-          sumSquaredError += diff * diff;
-        } else { // log
-          const diff = Math.log(target) - Math.log(actual); // in nepers
-          sumSquaredError += diff * diff;
-        }
-      }
-    } else if (model === "pairwise") {
-      // Pairwise: compare all interval pairs
-      // Include the root (index 0) as ratio 1
-      const allRatios = [1, ...ratios];
-      const allTargetRatios = targetRatios;
-
-      for (let i = 0; i < allTargetRatios.length; i++) {
-        for (let j = i + 1; j < allTargetRatios.length; j++) {
-          const targetInterval = allTargetRatios[j] / allTargetRatios[i];
-          const actualInterval = allRatios[j] / allRatios[i];
-
-          if (domain === "linear") {
-            const diff = targetInterval - actualInterval;
-            sumSquaredError += diff * diff;
-          } else { // log
-            const diff = Math.log(targetInterval) - Math.log(actualInterval); // in nepers
-            sumSquaredError += diff * diff;
-          }
-        }
-      }
-    } else if (model === "all-steps") {
-      // All-steps: compare only successive intervals
-      const allRatios = [1, ...ratios];
-      const allTargetRatios = targetRatios;
-
-      for (let i = 0; i < n; i++) {
-        const targetInterval = allTargetRatios[i + 1] / allTargetRatios[i];
-        const actualInterval = allRatios[i + 1] / allRatios[i];
-
-        if (domain === "linear") {
-          const diff = targetInterval - actualInterval;
-          sumSquaredError += diff * diff;
-        } else { // log
-          const diff = Math.log(targetInterval) - Math.log(actualInterval); // in nepers
-          sumSquaredError += diff * diff;
-        }
-      }
-    }
-
-    return sumSquaredError;
-  }
-
-  // Use grid search to find optimal x
-  // Start with a reasonable range based on the chord and deltas
-  const avgRatio = ratios.reduce((a, b) => a + b, 0) / n;
-  let xMin = sumD / (avgRatio * 10); // Lower bound
-  let xMax = sumD / (avgRatio * 0.1); // Upper bound
-
-  // Coarse grid search
-  let bestX = xMin;
-  let bestError = computeError(xMin);
-  const coarseSteps = 1000;
-  const coarseStep = (xMax - xMin) / coarseSteps;
-
-  for (let i = 0; i <= coarseSteps; i++) {
-    const testX = xMin + i * coarseStep;
-    const error = computeError(testX);
-    if (error < bestError) {
-      bestError = error;
-      bestX = testX;
-    }
-  }
-
-  // Fine grid search around the best point
-  xMin = Math.max(bestX - coarseStep, sumD / (avgRatio * 10));
-  xMax = bestX + coarseStep;
-  const fineSteps = 2000;
-  const fineStep = (xMax - xMin) / fineSteps;
-
-  for (let i = 0; i <= fineSteps; i++) {
-    const testX = xMin + i * fineStep;
-    const error = computeError(testX);
-    if (error < bestError) {
-      bestError = error;
-      bestX = testX;
-    }
-  }
-
-  const x = bestX;
-
-  // Compute final target ratios and error
   const targetRatios = [1]; // Root
-  for (let i = 0; i < n; i++) {
-    targetRatios.push(1 + cumulativeDeltas[i] / x);
+  for (let i = 0; i < targetDeltas.length; i++) {
+    targetRatios.push(1 + cumulativeDeltas[i] / result.x);
   }
 
-  let lsError = Math.sqrt(bestError);
-
-  // Convert to cents if logarithmic
-  if (domain === "log") {
-    lsError = lsError * (1200 / Math.LN2); // nepers to cents
-  }
-
-  // Build target delta signature string
+  // Build delta signature string
   const deltaSignature = "+" + targetDeltas.join("+");
 
   // Store target ratios for visualization
   targetRatiosForViz = targetRatios;
 
   // Display result
-  const errorStr = lsError.toFixed(domain === "log" ? 3 : 6) + (domain === "log" ? " ¢" : "");
-  document.getElementById("ls-error").textContent = errorStr + ` (x = ${x.toFixed(4)}, target: ${deltaSignature})`;
+  const errorStr = result.error.toFixed(domain === "log" ? 3 : 6) + (domain === "log" ? " ¢" : "");
+  document.getElementById("ls-error").textContent = errorStr + ` (x = ${result.x.toFixed(4)}, target: ${deltaSignature})`;
 
-  // Update visualization to show target
+  // Update visualization
   updateVisualization();
 
-  return {error: lsError, x, targetRatios, deltaSignature};
+  return { error: result.error, x: result.x, targetRatios, deltaSignature };
 }
 
 // ============ PDR Chord Processing ============
@@ -922,7 +797,7 @@ function preprocessPDRChordData(intervalsFromRoot, targetDeltas, isFree) {
   }
 
   // For the included range, we need CUMULATIVE ratios from the (possibly rebased) root
-  // The least-squares formula uses f_i = (x + D_i)/x where f_i is the ratio to root
+  // The least-squares formula uses r_i = (x + D_i)/x where r_i is the ratio to root
   const includedRatios = [];
   for (let i = firstIncludedInterval; i <= lastIncludedInterval; i++) {
     const cumulativeRatio = intervalsFromRoot[i] / baseRatio;
@@ -1136,9 +1011,9 @@ function calculatePDRError(domain, model) {
   
   // Build initial guess (using scaled deltas)
   // For a chord like 1:f1:f2:...:fn approximating x:(x+d1):(x+d1+d2):...
-  // We have f_i ≈ (x + D_i) / x where D_i is cumulative delta
+  // We have r_i ≈ (x + D_i) / x where D_i is cumulative delta
   // A good initial guess for x: use the first ratio and first delta
-  // f_1 ≈ (x + delta_1) / x  =>  x ≈ delta_1 / (f_1 - 1)
+  // r_1 ≈ (x + delta_1) / x  =>  x ≈ delta_1 / (r_1 - 1)
   
   let initialX = targetX; // Start near our target
   if (scaledTargetDeltas.length > 0 && !includedIsFree[0]) {
@@ -1161,8 +1036,8 @@ function calculatePDRError(domain, model) {
     const segEnd = seg.end;
     const segLength = segEnd - segStart + 1;
     
-    // Estimate: if ratios grow from f_start to f_end, 
-    // cumulative delta changes by approximately x * (f_end - f_start)
+    // Estimate: if ratios grow from r_start to r_end, 
+    // cumulative delta changes by approximately x * (r_end - r_start)
     let estimatedDeltaSum = 1.0 * segLength * deltaScaleFactor; // Default, scaled
     
     if (segEnd < includedN - 1) {
@@ -1359,7 +1234,7 @@ function calculateLeastSquaresError() {
     }
   } else {
     // No free deltas, use FDR calculation
-    calculateFDRError(domain, model);
+    calculateFDRErrorUI(domain, model);
   }
 }
 
