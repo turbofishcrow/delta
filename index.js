@@ -1,5 +1,3 @@
-const GROUND_INDIGO = "#76f";
-
 const DEFAULT_PITCH_STANDARD = 220;
 
 let currentIntervalCount = 1;
