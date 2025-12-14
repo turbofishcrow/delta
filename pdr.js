@@ -194,10 +194,10 @@ function generateStartingPoints(rValues, deltas, numFree, numStarts) {
   }
 
   // Add some generic estimates
-  const avgF = rValues.reduce((sum, f) => sum + f, 0) / rValues.length;
+  const avgR = rValues.reduce((sum, r) => sum + r, 0) / rValues.length;
   xEstimates.push(1.0);
   xEstimates.push(rValues[0]);
-  xEstimates.push(avgF);
+  xEstimates.push(avgR);
   xEstimates.push((rValues[0] + rValues[rValues.length - 1]) / 2);
 
   // For each x estimate, estimate free deltas

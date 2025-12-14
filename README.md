@@ -131,41 +131,41 @@ The error is computed as the root-mean-square difference between the target and 
 
 **Linear + Rooted:**
 ```
-minimize √(Σᵢ ((x + Dᵢ)/x - fᵢ)²)
+minimize √(Σᵢ ((x + Dᵢ)/x - rᵢ)²)
 ```
 Error in frequency ratio units (dimensionless).
 
 **Linear + Pairwise:**
 ```
-minimize √(Σᵢ<ⱼ ((x + Dⱼ)/(x + Dᵢ) - fⱼ/fᵢ)²)
+minimize √(Σᵢ<ⱼ ((x + Dⱼ)/(x + Dᵢ) - rⱼ/rᵢ)²)
 ```
 Compares all interval pairs. Error in frequency ratio units.
 
 **Linear + All-Steps:**
 ```
-minimize √(Σᵢ ((x + Dᵢ₊₁)/(x + Dᵢ) - fᵢ₊₁/fᵢ)²)
+minimize √(Σᵢ ((x + Dᵢ₊₁)/(x + Dᵢ) - rᵢ₊₁/rᵢ)²)
 ```
 Compares adjacent note pairs. Error in frequency ratio units.
 
 **Logarithmic + Rooted:**
 ```
-minimize √(Σᵢ (log((x + Dᵢ)/x) - log(fᵢ))²) × (1200/ln2)
+minimize √(Σᵢ (log((x + Dᵢ)/x) - log(rᵢ))²) × (1200/ln2)
 ```
 Error computed in nepers then converted to cents.
 
 **Logarithmic + Pairwise:**
 ```
-minimize √(Σᵢ<ⱼ (log((x + Dⱼ)/(x + Dᵢ)) - log(fⱼ/fᵢ))²) × (1200/ln2)
+minimize √(Σᵢ<ⱼ (log((x + Dⱼ)/(x + Dᵢ)) - log(rⱼ/rᵢ))²) × (1200/ln2)
 ```
 Compares all note pairs in log space. Error in cents.
 
 **Logarithmic + All-Steps:**
 ```
-minimize √(Σᵢ (log((x + Dᵢ₊₁)/(x + Dᵢ)) - log(fᵢ₊₁/fᵢ))²) × (1200/ln2)
+minimize √(Σᵢ (log((x + Dᵢ₊₁)/(x + Dᵢ)) - log(rᵢ₊₁/rᵢ))²) × (1200/ln2)
 ```
 Compares adjacent note pairs in log space. Error in cents.
 
-In all formulas, `fᵢ` are the cumulative frequency ratios from the root, `Dᵢ` are the cumulative deltas, and `x` is the base frequency of the target chord in the same units as the deltas.
+In all formulas, `rᵢ` are the cumulative frequency ratios from the root, `Dᵢ` are the cumulative deltas, and `x` is the base frequency of the target chord in the same units as the deltas.
 
 ## Running Locally
 
