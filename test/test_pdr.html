@@ -70,7 +70,7 @@
   <body>
     <h1>PDR Optimization Method Comparison Tests</h1>
     <p>
-      Testing different optimization methods (L-BFGS-B, Nelder-Mead, Powell) on
+      Testing different optimization methods (L-BFGS-B, BFGS-B, Nelder-Mead, Powell) on
       approximate PDR chords with 1, 2, and 3 free deltas
     </p>
     <div class="tolerance-note">
@@ -80,7 +80,7 @@
     <div id="test-results"></div>
     <div id="summary" class="summary"></div>
 
-    <script src="pdr.js"></script>
+    <script src="../pdr.js"></script>
     <script>
       function centsToRatio(cents) {
         return Math.pow(2, cents / 1200);
@@ -143,6 +143,17 @@
           solve: (deltas, ratios) => {
             return solvePDRChord(deltas, ratios, {
               method: 'lbfgs',
+              maxIterations: 100,
+              tolerance: 1e-8,
+              numStarts: 5
+            });
+          }
+        },
+        {
+          name: "BFGS-B",
+          solve: (deltas, ratios) => {
+            return solvePDRChord(deltas, ratios, {
+              method: 'bfgs',
               maxIterations: 100,
               tolerance: 1e-8,
               numStarts: 5

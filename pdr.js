@@ -8,6 +8,67 @@ function dot(a, b) {
   return a.reduce((sum, ai, i) => sum + ai * b[i], 0);
 }
 
+// Helper: identity matrix
+function id(n) {
+  const m = [];
+  for (let j = 0; j < n; j++) {
+    const col = Array(n).fill(0);
+    col[j] = 1;
+    m.push(col);
+  }
+  return m;
+}
+
+// Helper: matrix * vector
+// matrix is stored as [col0, col1, col2, ...]
+function matrix_times_vector(m, v) {
+  const m_rows = m[0].length;
+  const result = Array(m_rows).fill(0);
+  for (let i = 0; i < m_rows; i++) {
+    let row_i = m.map((col) => col[i]);
+    result[i] = dot(row_i, v);
+  }
+  return result;
+}
+
+// Helper: row vector * matrix
+function covector_times_matrix(vt, m) {
+  return m.map((col) => dot(vt, col));
+}
+
+// Helper: vector scalar multiplication
+function scalar_times_vector(a, v) {
+  return v.map((entry) => a*entry);
+}
+
+// Helper: matrix scalar multiplication
+function scalar_times_matrix(a, m) {
+  return m.map((col) => scalar_times_vector(a, col));
+}
+
+// Helper: outer product of two vectors
+function outer_product(v, w) {
+  const result = [];
+  for (let j = 0; j < w.length; j++) { // For each entry of w <=> each col of result
+    const col = [];
+    for (let i = 0; i < v.length; i++) { // For each entry of v <=> each row of result
+      col.push(v[i] * w[j]);
+    }
+    result.push(col);
+  }
+  return result;
+}
+
+// Helper: vector sum
+function vector_sum(v, w) {
+  return v.map((vi, i) => vi + w[i]);
+}
+
+// Helper: matrix sum
+function matrix_sum(m1, m2) {
+  return m1.map((col, j) => vector_sum(col, m2[j]));
+}
+
 // Numerical gradient computation
 function numericalGradient(f, x, eps = 1e-8) {
   const grad = new Array(x.length);
@@ -20,6 +81,126 @@ function numericalGradient(f, x, eps = 1e-8) {
   }
   return grad;
 }
+
+// Transform bounded problem to an unbounded one using log barrier
+function logBarrier(f, x, bounds, barrierWeight) {
+  let penalty = 0;
+  for (let i = 0; i < x.length; i++) {
+    const [lower, upper] = bounds[i];
+    if (lower !== null && x[i] <= lower) {
+      return Infinity;
+    }
+    if (upper !== null && x[i] >= upper) {
+      return Infinity;
+    }
+
+    // Log barrier penalties
+    if (lower !== null) {
+      penalty -= barrierWeight * Math.log(x[i] - lower);
+    }
+    if (upper !== null) {
+      penalty -= barrierWeight * Math.log(upper - x[i]);
+    }
+  }
+  return f(x) + penalty;
+}
+
+// BFGS implementation (unbounded)
+class BFGS {
+  constructor(options = {}) {
+    this.historySize = options.historySize || 10;
+    this.maxIterations = options.maxIterations || 100;
+    this.tolerance = options.tolerance || 1e-6;
+  }
+ 
+  minimize(f, grad, x0) {
+    const n = x0.length;
+    let x = [...x0];
+    let fx = f(x);
+    let g = grad(x); // gradient of f
+
+    // Approximate inverse Hessian
+    // Initial approximation is the identity
+    let h = id(n);
+    for (let i = 0; i < this.maxIterations; i++) {
+      // 0: Check convergence
+      const gradNorm = Math.sqrt(g.reduce((sum, gi) => sum + gi * gi, 0));
+      if (gradNorm < this.tolerance) {
+        return { x, fx, iterations: i, success: true };
+      }
+
+      // 1: Set search direction `p` (negative gradient direction)
+      const p = matrix_times_vector(h, g.map(gi => -gi));
+      // 2: Get alpha ~= argmin f(x + alpha * p) satisfying Wolfe conditions
+      // (Armijo rule and curvature condition)
+      const c1 = 1e-4;
+      const c2 = 0.9;
+      const maxLineSearch = 20;
+      const rho_ls = 0.5
+      // Check for sufficient decrease (Armijo rule)
+      // f(x + alpha*p) <= f(x) + c1 * alpha * p^T * g
+      const gp = dot(g, p);
+      let alpha = 1.0;
+      for (let _ = 0; _ < maxLineSearch; _++) {
+        const s = scalar_times_vector(alpha, p);
+        const xNextGuess = vector_sum(x, s);
+        const armijoRule = f(xNextGuess) <= fx + c1 * alpha * gp;
+        const gNextGuess = grad(xNextGuess);
+        const curvatureCondition = -dot(p, gNextGuess) <= -c2 * gp;
+        if (armijoRule && curvatureCondition) {
+          break;
+        }
+        alpha *= rho_ls;
+      }
+
+      // 3: Set s = alpha * p and x_next = x + s
+      const s = scalar_times_vector(alpha, p);
+      const xNext = vector_sum(x, s);
+
+      // 4: Set y = grad(x_next) - grad(x)
+      const y = grad(xNext).map((entry, i) => entry - g[i]);
+
+      // 5: Update h += (stuff) / (dot(s, y) * dot(s, y)) + (more_stuff) / dot(s, y)
+      // where stuff == dot(s, y) + dot(y, matrix_times_vector(h, y))
+      const sy = dot(s, y);
+      const scalar1 = (sy + dot(y, matrix_times_vector(h, y))) / (sy * sy);
+      const u = scalar_times_matrix(scalar1, outer_product(s, s));
+      const w = matrix_sum(
+        outer_product(matrix_times_vector(h, y), s),
+        outer_product(s, covector_times_matrix(y, h))
+      );
+      const v = scalar_times_matrix(-1 / sy, w);
+      h = matrix_sum(h, matrix_sum(u, v));
+
+      // Update x, fx, and g for next iteration
+      x = xNext;
+      fx = f(x);
+      g = grad(x);
+    }
+
+    return { x, fx, iterations: this.maxIterations, success: false };
+  }
+}
+
+class BoundedBFGS {
+  constructor(options = {}) {
+    this.bfgs = new BFGS(options);
+    this.barrierWeight = options.barrierWeight || 1e-6;
+  }
+
+  minimize(f, bounds, x0) {
+    const barrierWeight = this.barrierWeight;
+    const grad = (x) => numericalGradient((x) => logBarrier(f, x, bounds, barrierWeight), x);
+
+    const result = this.bfgs.minimize((x) => logBarrier(f, x, bounds, barrierWeight), grad, x0);
+
+    // Return the actual function value, not the transformed one
+    result.fx = f(result.x);
+
+    return result;
+  }
+}
+
 
 // Simple L-BFGS implementation (unbounded)
 class LBFGS {
@@ -120,7 +301,6 @@ class LBFGS {
   }
 }
 
-// Box constraint transformation using log-barrier
 class BoundedLBFGS {
   constructor(options = {}) {
     this.lbfgs = new LBFGS(options);
@@ -128,32 +308,10 @@ class BoundedLBFGS {
   }
 
   minimize(f, bounds, x0) {
-    // Transform to unbounded problem using log barrier
-    const transformedF = (x) => {
-      let penalty = 0;
-      for (let i = 0; i < x.length; i++) {
-        const [lower, upper] = bounds[i];
-        if (lower !== null && x[i] <= lower) {
-          return Infinity;
-        }
-        if (upper !== null && x[i] >= upper) {
-          return Infinity;
-        }
+    const barrierWeight = this.barrierWeight;
+    const grad = (x) => numericalGradient((x) => logBarrier(f, x, bounds, barrierWeight), x);
 
-        // Log barrier penalties
-        if (lower !== null) {
-          penalty -= this.barrierWeight * Math.log(x[i] - lower);
-        }
-        if (upper !== null) {
-          penalty -= this.barrierWeight * Math.log(upper - x[i]);
-        }
-      }
-      return f(x) + penalty;
-    };
-
-    const grad = (x) => numericalGradient(transformedF, x);
-
-    const result = this.lbfgs.minimize(transformedF, grad, x0);
+    const result = this.lbfgs.minimize((x) => logBarrier(f, x, bounds, barrierWeight), grad, x0);
 
     // Return the actual function value, not the transformed one
     result.fx = f(result.x);
@@ -237,7 +395,7 @@ function generateStartingPoints(rValues, deltas, numFree, numStarts) {
  * @param {Array} deltas - Array with numbers for fixed deltas, null for free variables
  * @param {Array} rValues - Target frequency ratios [r1, r2, r3, ...]
  * @param {Object} options - Optimization options
- * @param {string} options.method - Optimizer to use: 'lbfgs' (default), 'nelder-mead', 'powell'
+ * @param {string} options.method - Optimizer to use: 'lbfgs' (default), 'bfgs', 'nelder-mead', 'powell'
  * @param {string} options.domain - Error domain: 'linear' (default) or 'log'
  * @param {string} options.model - Error model: 'rooted' (default), 'pairwise', or 'all-steps'
  * @returns {Object} Solution with x, freeDeltas, error, success
@@ -339,6 +497,25 @@ function solvePDRChord(deltas, rValues, options = {}) {
 
   if (method === 'lbfgs') {
     const optimizer = new BoundedLBFGS({
+      historySize: options.historySize || 10,
+      maxIterations: options.maxIterations || 100,
+      tolerance: options.tolerance || 1e-8,
+      barrierWeight: options.barrierWeight || 1e-6
+    });
+
+    for (const x0 of startingPoints) {
+      try {
+        const result = optimizer.minimize(errorFunction, bounds, x0);
+        if (result.fx < bestError) {
+          bestError = result.fx;
+          bestResult = result;
+        }
+      } catch (e) {
+        // console.warn('Optimization failed for starting point:', x0, e);
+      }
+    }
+  } else if (method === 'bfgs') {
+    const optimizer = new BoundedBFGS({
       historySize: options.historySize || 10,
       maxIterations: options.maxIterations || 100,
       tolerance: options.tolerance || 1e-8,
@@ -985,6 +1162,8 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     LBFGS,
     BoundedLBFGS,
+    BFGS,
+    BoundedBFGS,
     NelderMead,
     Powell,
     dot,

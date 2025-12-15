@@ -1,4 +1,4 @@
-const { solvePDRChord } = require('./pdr.js');
+const { solvePDRChord } = require('../pdr.js');
 
 function centsToRatio(cents) {
   return Math.pow(2, cents / 1200);
@@ -43,14 +43,14 @@ const testCases = [
   }
 ];
 
-const methods = ['lbfgs', 'nelder-mead', 'powell'];
+const methods = ['lbfgs', 'bfgs', 'nelder-mead', 'powell'];
 
 testCases.forEach(tc => {
   console.log(`\nTest: ${tc.name}`);
   console.log(`Expected: x=${tc.expected.x}, free=[${tc.expected.free}]`);
 
   const results = methods.map(m => {
-    const maxIter = m === 'lbfgs' ? 100 : m === 'nelder-mead' ? 400 : 250;
+    const maxIter = m === 'lbfgs' ? 100 : m === 'bfgs' ? 100 : m === 'nelder-mead' ? 400 : 250;
     const r = solvePDRChord(tc.deltas, tc.ratios, { method: m, maxIterations: maxIter, numStarts: 5 });
     return { method: m, x: r.x, free: r.freeDeltas, error: r.error, success: r.success };
   });
