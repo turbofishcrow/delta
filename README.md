@@ -23,10 +23,9 @@ For example, a chord with delta signature `+1+1` means the frequency difference 
 
 ### Interval Updates
 
-- **Update from cents/ratio (keep deltas)**: The changed interval updates, and all other intervals shift to maintain their delta values
+- **Update from interval (keep deltas)**: The changed interval updates, and all other intervals shift to maintain their delta values
 - **Update from delta (keep other deltas)**: The changed interval recalculates its cents/ratio based on intervals below it (based on previous size if it's the bottom interval), and intervals above it shift while keeping their deltas fixed
-- **New deltas from cents**: A global button that recalculates all deltas based on the entered cents values — useful after manually entering multiple interval values
-- **New deltas from ratios**: A global button that recalculates all deltas based on the entered ratio values
+- **Update from all intervals (recalc deltas)**: A global button that recalculates all deltas based on the entered cents values — useful after manually entering multiple interval values
 - **Update from all deltas (keep first interval)**: A global button that recalculates all cents/ratios from the current delta values, keeping the first (bottom) interval fixed — useful for setting up a specific delta signature
 
 ### Target Delta Signature
