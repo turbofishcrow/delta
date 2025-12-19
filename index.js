@@ -129,15 +129,7 @@ function refreshChordIfPlaying() {
 
 function setWaveform(waveform) {
   currentWaveform = waveform;
-  // Update button states
-  document.querySelectorAll(".waveform-btn").forEach((btn) => {
-    btn.classList.remove("active");
-  });
-  const activeBtn = document.getElementById(`btn-waveform-${waveform}`);
-  if (activeBtn) {
-    activeBtn.classList.add("active");
-  }
-  
+
   // If chord is playing, restart with new waveform
   if (activeOscillators.length > 0) {
     playChord();
@@ -561,7 +553,9 @@ function attachIntervalListeners(intervalIndex) {
   const centsBtn = document.getElementById(`btn-update-cents-${intervalIndex}`);
   const ratioBtn = document.getElementById(`btn-update-ratio-${intervalIndex}`);
   const deltaBtn = document.getElementById(`btn-update-delta-${intervalIndex}`);
-  
+  const centsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
+  const ratioInput = document.getElementById(`input-interval-${intervalIndex}-ratio`);
+
   if (centsBtn) {
     centsBtn.addEventListener("click", () => updateFromCents(intervalIndex));
   }
@@ -571,13 +565,32 @@ function attachIntervalListeners(intervalIndex) {
   if (deltaBtn) {
     deltaBtn.addEventListener("click", () => updateFromDelta(intervalIndex));
   }
+
+  // Sync cents and ratio inputs in real-time
+  if (centsInput) {
+    centsInput.addEventListener("input", () => {
+      const cents = parseCents(centsInput.value);
+      if (!isNaN(cents) && cents > 0) {
+        const ratio = centsToRatio(cents);
+        ratioInput.value = ratio.toFixed(6);
+      }
+    });
+  }
+  if (ratioInput) {
+    ratioInput.addEventListener("input", () => {
+      const cents = ratioToCents(ratioInput.value);
+      if (!isNaN(cents) && cents > 0) {
+        centsInput.value = cents.toFixed(3);
+      }
+    });
+  }
 }
 
 // Attach listeners for the first interval
 attachIntervalListeners(1);
 
-// Initialize first interval from ratio
-updateFromRatio(1);
+// Initialize first interval from cents
+updateFromCents(1);
 
 const btnAddInterval = document.getElementById("btn-add-interval");
 const btnRemoveInterval = document.getElementById("btn-remove-interval");
@@ -667,11 +680,11 @@ btnClearIntervals.addEventListener("click", () => {
 
 document.getElementById("btn-play-chord").addEventListener("click", playChord);
 document.getElementById("btn-stop-chord").addEventListener("click", stopChord);
-document.getElementById("btn-waveform-sine").addEventListener("click", () => setWaveform("sine"));
-document.getElementById("btn-waveform-triangle").addEventListener("click", () => setWaveform("triangle"));
-document.getElementById("btn-waveform-semisine").addEventListener("click", () => setWaveform("semisine"));
-document.getElementById("btn-waveform-square").addEventListener("click", () => setWaveform("square"));
-document.getElementById("btn-waveform-saw").addEventListener("click", () => setWaveform("sawtooth"));
+
+// Waveform selection
+document.getElementById("waveform-select").addEventListener("change", (e) => {
+  setWaveform(e.target.value);
+});
 
 // Refresh chord when base frequency changes
 document.getElementById("input-base-frequency").addEventListener("input", refreshChordIfPlaying);
@@ -993,8 +1006,7 @@ function calculateLeastSquaresError() {
 }
 
 // Set up event listeners
-document.getElementById("btn-recalc-from-cents").addEventListener("click", recalcFromCents);
-document.getElementById("btn-recalc-from-ratios").addEventListener("click", recalcFromRatios);
+document.getElementById("btn-recalc-deltas").addEventListener("click", recalcFromCents);
 document.getElementById("btn-update-from-deltas").addEventListener("click", updateAllFromDeltas);
 document.getElementById("btn-calculate-error").addEventListener("click", calculateLeastSquaresError);
 
@@ -1321,5 +1333,5 @@ refreshChordIfPlaying = function() {
 };
 
 // Initial visualization
-updateFromRatio(1); // This already triggers refreshChordIfPlaying
+updateFromCents(1); // This already triggers refreshChordIfPlaying
 updateVisualization();
