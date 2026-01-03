@@ -2,7 +2,7 @@
 
 A web-based tool for exploring and analyzing [delta-rational chords](https://en.xen.wiki/w/Delta-rational_chord) — chords where the frequency differences (deltas) between successive notes have simple integer ratios.
 
-![Front page screenshot](https://raw.githubusercontent.com/inthar-raven/delta/main/static/images/front.png)
+![Front page screenshot](https://raw.githubusercontent.com/turbofishcrow/delta/main/static/images/front.png)
 
 ## What are Delta-Rational Chords?
 
