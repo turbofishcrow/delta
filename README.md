@@ -114,7 +114,7 @@ When no deltas are marked as free, a two-stage grid search is used to find the o
 1. **Coarse search**: 1000 steps across a wide range to locate the general region
 2. **Fine search**: 1000 steps zooming in around the best point for precision
 
-This approach works correctly for all 4 error modes (linear/log × rooted/pairwise) without requiring complex derivative calculations.
+This approach works correctly for all 6 error modes (linear/log × rooted/pairwise/all-steps) without requiring complex derivative calculations.
 
 ### PDR (Partially Delta-Rational)
 Uses L-BFGS-B optimization to minimize the sum of squared errors over all variables simultaneously. The optimization:
