@@ -679,15 +679,42 @@ svg {
 
 /* Audio Controls */
 
-#audio-controls {
+#audio-controls,
+#build-audio-controls,
+#measure-audio-controls {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-#audio-controls strong {
+#audio-controls strong,
+#build-audio-controls strong,
+#measure-audio-controls strong {
   margin-right: 4px;
+}
+
+/* Error Controls */
+#measure-error-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#measure-error-controls > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Button groups - responsive wrapping */
+.button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
 }
 
 .waveform-btn {

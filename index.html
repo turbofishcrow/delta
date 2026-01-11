@@ -22,7 +22,7 @@
       <!-- Tab Navigation -->
       <div class="tab-nav">
         <button class="tab-btn active" data-tab="build">Build</button>
-        <button class="tab-btn" data-tab="measure">Measure</button>
+        <button class="tab-btn" data-tab="measure">Measure Error</button>
       </div>
 
       <!-- Tab Content -->
@@ -61,15 +61,17 @@
                 </div>
                 <hr />
                 <strong>Add/Remove intervals</strong>
-                <br/>
-                <button id="build-btn-add">Append +1</button>
-                <button id="build-btn-remove">Remove last</button>
-                <button id="build-btn-clear">Keep first only</button>
+                <div class="button-group">
+                  <button id="build-btn-add">Append +1</button>
+                  <button id="build-btn-remove">Remove last</button>
+                  <button id="build-btn-clear">Keep first only</button>
+                </div>
                 <hr />
                 <strong>Global update</strong>
-                <br/>
-                <button id="build-btn-recalc-deltas">Update from all intervals (recalc deltas)</button>
-                <button id="build-btn-update-from-deltas">Update from all deltas (keep outer interval)</button>
+                <div class="button-group">
+                  <button id="build-btn-recalc-deltas">Update from all intervals (recalc deltas)</button>
+                  <button id="build-btn-update-from-deltas">Update from all deltas (keep outer interval)</button>
+                </div>
                 <hr />
                 <strong>Intervals</strong>
                 <table id="build-intervals">
@@ -177,14 +179,14 @@
                 </div>
                 <hr />
                 <strong>Intervals</strong>
-                <br/>
-                <button id="measure-btn-add">Add interval</button>
-                <button id="measure-btn-remove">Remove last</button>
-                <button id="measure-btn-copy-from-build">Copy from Build</button>
+                <div class="button-group">
+                  <button id="measure-btn-add">Add interval</button>
+                  <button id="measure-btn-remove">Remove last</button>
+                  <button id="measure-btn-copy-from-build">Copy from Build</button>
+                </div>
                 <table id="measure-intervals">
                   <tr>
                     <td>
-                      <strong>#1</strong>
                       <input
                         type="text"
                         id="measure-interval-1-cents"
@@ -192,7 +194,8 @@
                         value="386.314"
                         style="width: 80px"
                       />
-                      Cents
+                      Interval (cents or a\n)
+                      <br/>
                       <input
                         type="text"
                         id="measure-interval-1-ratio"
@@ -203,6 +206,7 @@
                       Ratio
                     </td>
                     <td>
+                      Target delta
                       <input
                         type="number"
                         id="measure-interval-1-target-delta"
@@ -210,13 +214,13 @@
                         value="1"
                         style="width: 60px"
                       />
-                      Target delta
+                      <br/>
+                      Free
                       <input
                         type="checkbox"
                         id="measure-interval-1-free"
                         name="measure-interval-1-free"
                       />
-                      Free
                     </td>
                   </tr>
                 </table>

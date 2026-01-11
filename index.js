@@ -864,6 +864,8 @@ const MeasureTab = {
   },
 
   playTarget() {
+    // Compute error first to get target ratios
+    this.calculateError();
     const frequencies = this.getTargetChordFrequencies();
     Audio.playFrequencies(frequencies);
   },
@@ -881,9 +883,8 @@ const MeasureTab = {
     const newRow = document.createElement("tr");
     newRow.innerHTML = `
       <td>
-        <strong>#${this.intervalCount}</strong>
         <input type="text" id="${this.prefix}-interval-${this.intervalCount}-cents" style="width: 80px" value="701.955" />
-        Cents<br/<br/>
+        Interval (cents or a\\n)<br/<br/>
         <input type="text" id="${this.prefix}-interval-${this.intervalCount}-ratio" style="width: 80px" value="1.5" />
         Ratio
       </td>
@@ -896,7 +897,7 @@ const MeasureTab = {
     `;
     intervalTable.appendChild(newRow);
     this.attachIntervalListeners(this.intervalCount);
-    Visualization.update(this.prefix);
+    this.refreshIfPlaying();
   },
 
   removeInterval() {
@@ -904,7 +905,7 @@ const MeasureTab = {
       const intervalTable = document.getElementById(`${this.prefix}-intervals`);
       intervalTable.removeChild(intervalTable.lastElementChild);
       this.intervalCount--;
-      Visualization.update(this.prefix);
+      this.refreshIfPlaying();
     }
   },
 
@@ -935,7 +936,7 @@ const MeasureTab = {
       document.getElementById(`${this.prefix}-interval-${i}-ratio`).value = buildRatio;
     }
 
-    Visualization.update(this.prefix);
+    this.refreshIfPlaying();
   },
 
   attachIntervalListeners(intervalIndex) {
@@ -948,7 +949,7 @@ const MeasureTab = {
         if (!isNaN(cents) && cents > 0) {
           const ratio = Utils.centsToRatio(cents);
           ratioInput.value = ratio.toFixed(6);
-          Visualization.update(this.prefix);
+          this.refreshIfPlaying();
         }
       });
     }
@@ -957,7 +958,7 @@ const MeasureTab = {
         const cents = Utils.ratioToCents(ratioInput.value);
         if (!isNaN(cents) && cents > 0) {
           centsInput.value = cents.toFixed(3);
-          Visualization.update(this.prefix);
+          this.refreshIfPlaying();
         }
       });
     }
@@ -1083,7 +1084,7 @@ const MeasureTab = {
     document.getElementById(`${this.prefix}-btn-clear-target`).addEventListener("click", () => this.clearTarget());
 
     // Base frequency
-    document.getElementById(`${this.prefix}-base-frequency`).addEventListener("input", () => Visualization.update(this.prefix));
+    document.getElementById(`${this.prefix}-base-frequency`).addEventListener("input", () => this.refreshIfPlaying());
 
     // Visualization controls
     document.getElementById(`${this.prefix}-btn-update-viz`).addEventListener("click", () => Visualization.update(this.prefix));
