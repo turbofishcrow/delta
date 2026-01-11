@@ -153,6 +153,50 @@ a:hover {
   text-decoration: underline;
 }
 
+/* Tab Navigation */
+.tab-nav {
+  display: flex;
+  gap: 0;
+  margin: 20px 0 0 0;
+  border-bottom: 2px solid var(--c1);
+}
+
+.tab-btn {
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: #888;
+  font-size: 1em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: -2px;
+}
+
+.tab-btn:hover {
+  color: #aaa;
+  background: rgba(119, 102, 255, 0.1);
+}
+
+.tab-btn.active {
+  color: var(--c1);
+  border-bottom-color: var(--c1);
+  background: rgba(119, 102, 255, 0.1);
+}
+
+/* Tab Content */
+.tab-content {
+  margin-top: 0;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
 /*pre {font: 1em/1.6 var(--mono); background: var(--c2); padding: 1em; overflow: auto}*/
 /*pre {font: 1em/1.6 var(--mono); overflow: auto} */
 *,
@@ -497,21 +541,37 @@ svg {
     min-width: 0;
   }
 
+  /* Mobile tab navigation - sticky at top */
+  .tab-nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background-color: #000;
+    margin: 10px -20px 0 -20px;
+    padding: 0 20px;
+  }
+
+  .tab-btn {
+    flex: 1;
+    text-align: center;
+    padding: 10px 16px;
+  }
+
   /* Convert main table to block layout on mobile for better sticky behavior */
-  body > div > table {
+  .tab-panel > table {
     display: block;
   }
 
-  body > div > table > tbody {
+  .tab-panel > table > tbody {
     display: block;
   }
 
-  body > div > table > tbody > tr {
+  .tab-panel > table > tbody > tr {
     display: flex;
     flex-direction: column; /* Visualization at bottom on mobile */
   }
 
-  body > div > table > tbody > tr > td {
+  .tab-panel > table > tbody > tr > td {
     display: block;
     width: 100%;
   }
@@ -567,7 +627,7 @@ svg {
     border-top: 1px solid rgba(119, 102, 255, 0.3);
   }
 
-  .visualization-column > #visualization {
+  .visualization-column > div[id$="-visualization"] {
     flex: 1;
     overflow-y: auto;
     padding: 10px;
@@ -582,22 +642,22 @@ svg {
   }
 
   /* Make internal hr separators (inside visualization) very subtle */
-  #visualization hr {
+  div[id$="-visualization"] hr {
     border: none;
     border-top: 1px solid rgba(119, 102, 255, 0.15);
     margin: 15px 0;
   }
 
   /* Ensure error section stays in flow and doesn't float */
-  .visualization-column #error-display {
+  .visualization-column #measure-error-result {
     position: relative;
     z-index: 1;
     background-color: var(--c3);
   }
 
   /* Ensure visualization content doesn't have positioning that causes floating */
-  .visualization-column #viz-container,
-  .visualization-column #viz-controls {
+  .visualization-column div[id$="-viz-container"],
+  .visualization-column div[id$="-viz-controls"] {
     position: relative;
     z-index: 1;
     background-color: var(--c3);

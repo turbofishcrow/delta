@@ -1,1425 +1,1163 @@
-const DEFAULT_PITCH_STANDARD = 220;
+// ============ Shared State ============
 
-let currentIntervalCount = 1;
+const AppState = {
+  activeTab: 'build',
+  audioContext: null,
+  activeOscillators: [],
+  isPlaying: false,
+  currentWaveform: 'sine',
+  DEFAULT_PITCH_STANDARD: 220
+};
 
-// Target ratios for visualization (set on error computation)
-let targetRatiosForViz = null;
+// ============ Shared Utilities ============
 
-// ============ Audio Playback ============
-
-let audioContext = null;
-let activeOscillators = [];
-let isPlaying = false;
-let currentWaveform = "sine"; // "sine", "triangle", "semisine", "square", or "sawtooth"
-
-function getAudioContext() {
-  if (!audioContext) {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  return audioContext;
-}
-
-// Create a semisine waveform (half sine wave, then silence)
-function createSemisineWave(ctx) {
-  const length = 4096;
-  const real = new Float32Array(length);
-  const imag = new Float32Array(length);
-  
-  // Semisine is created by summing specific harmonics
-  // It's a half-wave rectified sine, which has a specific Fourier series
-  real[0] = 0;
-  imag[0] = 0;
-  
-  // Half-wave rectified sine Fourier coefficients
-  // DC component
-  real[1] = 0;
-  imag[1] = 0.5; // fundamental
-  
-  for (let n = 2; n < length; n++) {
-    if (n % 2 === 0) {
-      // Even harmonics: 2/(π(1-n²))
-      real[n] = 2 / (Math.PI * (1 - n * n));
-      imag[n] = 0;
-    } else {
-      real[n] = 0;
-      imag[n] = 0;
+const Utils = {
+  parseCents(input) {
+    if (typeof input !== "string") {
+      return parseFloat(input);
     }
-  }
-  
-  return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
-}
-
-function createOscillator(frequency, waveform) {
-  const ctx = getAudioContext();
-  const oscillator = ctx.createOscillator();
-  const gainNode = ctx.createGain();
-  
-  if (waveform === "semisine") {
-    oscillator.setPeriodicWave(createSemisineWave(ctx));
-  } else {
-    oscillator.type = waveform; // "sine", "triangle", "square", or "sawtooth"
-  }
-  
-  oscillator.frequency.setValueAtTime(frequency, ctx.currentTime);
-  gainNode.gain.setValueAtTime(0.3, ctx.currentTime); // Moderate volume
-  
-  oscillator.connect(gainNode);
-  gainNode.connect(ctx.destination);
-  
-  return { oscillator, gainNode };
-}
-
-function getChordFrequencies() {
-  const baseFreq = parseFloat(document.getElementById("input-base-frequency").value) || DEFAULT_PITCH_STANDARD;
-  const frequencies = [baseFreq];
-  
-  // Collect all interval inputs
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const centsInput = document.getElementById(`input-interval-${i}-cents`);
-    if (centsInput) {
-      const cents = parseCents(centsInput.value);
-      if (!isNaN(cents)) {
-        const freq = baseFreq * Math.pow(2, cents / 1200);
-        frequencies.push(freq);
+    if (input.includes("\\")) {
+      const parts = input.split("\\");
+      if (parts.length === 2) {
+        const steps = parseFloat(parts[0]);
+        const edo = parseFloat(parts[1]);
+        if (!isNaN(steps) && !isNaN(edo) && edo > 0) {
+          return (1200 * steps) / edo;
+        }
       }
+      return NaN;
     }
-  }
-  
-  return frequencies;
-}
-
-function playChord() {
-  stopChord(); // Stop any currently playing chord
-  
-  const ctx = getAudioContext();
-  if (ctx.state === "suspended") {
-    ctx.resume();
-  }
-  
-  isPlaying = true;
-  const frequencies = getChordFrequencies();
-  const numNotes = frequencies.length;
-  
-  frequencies.forEach((freq) => {
-    const { oscillator, gainNode } = createOscillator(freq, currentWaveform);
-    // Adjust gain based on number of notes to prevent clipping
-    gainNode.gain.setValueAtTime(0.3 / Math.sqrt(numNotes), ctx.currentTime);
-    oscillator.start();
-    activeOscillators.push({ oscillator, gainNode });
-  });
-}
-
-function stopChord() {
-  const ctx = getAudioContext();
-  activeOscillators.forEach(({ oscillator, gainNode }) => {
-    // Fade out to avoid clicks
-    gainNode.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
-    oscillator.stop(ctx.currentTime + 0.1);
-  });
-  activeOscillators = [];
-  isPlaying = false;
-}
-
-// Refresh the chord if audio is currently playing
-function refreshChordIfPlaying() {
-  if (isPlaying) {
-    playChord();
-  }
-}
-
-function setWaveform(waveform) {
-  currentWaveform = waveform;
-
-  // If chord is playing, restart with new waveform
-  if (activeOscillators.length > 0) {
-    playChord();
-  }
-}
-
-// ============ UI Setup ============
-
-// ============ Interval Conversion Utilities ============
-
-/**
- * Parse a cents value from various formats:
- * - Plain number: "386.31" -> 386.31
- * - EDO notation: "5\12" -> 5 steps of 12-EDO = 500 cents
- * - EDO notation: "7\31" -> 7 steps of 31-EDO
- */
-function parseCents(input) {
-  if (typeof input !== "string") {
     return parseFloat(input);
-  }
-  
-  // Check for EDO notation: x\n (x steps of n-EDO)
-  if (input.includes("\\")) {
-    const parts = input.split("\\");
-    if (parts.length === 2) {
-      const steps = parseFloat(parts[0]);
-      const edo = parseFloat(parts[1]);
-      if (!isNaN(steps) && !isNaN(edo) && edo > 0) {
-        return (1200 * steps) / edo;
-      }
-    }
-    return NaN;
-  }
-  
-  // Plain number
-  return parseFloat(input);
-}
-
-function ratioToCents(ratio) {
-  // Parse ratio string like "5/4" or decimal like "1.25"
-  let value;
-  if (typeof ratio === "string" && ratio.includes("/")) {
-    const parts = ratio.split("/");
-    value = parseFloat(parts[0]) / parseFloat(parts[1]);
-  } else {
-    value = parseFloat(ratio);
-  }
-  if (isNaN(value) || value <= 0) return NaN;
-  return 1200 * Math.log2(value);
-}
-
-function centsToRatio(cents) {
-  return Math.pow(2, cents / 1200);
-}
-
-function getBaseFrequency() {
-  const freq = parseFloat(document.getElementById("input-base-frequency").value);
-  if (isNaN(freq) || freq <= 0) {
-    return DEFAULT_PITCH_STANDARD;
-  }
-  return freq;
-}
-
-// Calculate the cumulative frequency for interval i (1-indexed)
-function getFrequencyForInterval(intervalIndex) {
-  const baseFreq = getBaseFrequency();
-  const centsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
-  if (centsInput) {
-    const cents = parseCents(centsInput.value);
-    if (!isNaN(cents)) {
-      return baseFreq * Math.pow(2, cents / 1200);
-    }
-  }
-  return baseFreq;
-}
-
-// Get the frequency of the note just below interval i
-function getPreviousFrequency(intervalIndex) {
-  if (intervalIndex <= 1) {
-    return getBaseFrequency();
-  }
-  return getFrequencyForInterval(intervalIndex - 1);
-}
-
-// ============ Update Functions ============
-
-function updateFromCents(intervalIndex) {
-  const centsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
-  const ratioInput = document.getElementById(`input-interval-${intervalIndex}-ratio`);
-  
-  const cents = parseCents(centsInput.value);
-  if (isNaN(cents) || cents <= 0) {
-    alert("Cents must be a positive number.");
-    return;
-  }
-  
-  // Update the input to show the computed cents value (in case EDO notation was used)
-  centsInput.value = cents.toFixed(3);
-  
-  // Update ratio
-  const ratio = centsToRatio(cents);
-  ratioInput.value = ratio.toFixed(6);
-  
-  // Recalculate intervals other than this one, keeping their deltas fixed
-  recalculateIntervalsOtherThan(intervalIndex);
-  
-  refreshChordIfPlaying();
-}
-
-function updateFromRatio(intervalIndex) {
-  const centsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
-  const ratioInput = document.getElementById(`input-interval-${intervalIndex}-ratio`);
-  
-  const cents = ratioToCents(ratioInput.value);
-  if (isNaN(cents) || cents <= 0) {
-    alert("Ratio must be greater than 1.");
-    return;
-  }
-  
-  // Update cents
-  centsInput.value = cents.toFixed(3);
-  
-  // Recalculate intervals other than this one, keeping their deltas fixed
-  recalculateIntervalsOtherThan(intervalIndex);
-  
-  refreshChordIfPlaying();
-}
-
-// Recalculate all intervals other than the given index, keeping their deltas fixed
-function recalculateIntervalsOtherThan(intervalIndex) {
-  const baseFreq = getBaseFrequency();
-
-  // Get the changed interval's new frequency
-  const changedCentsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
-  const changedCents = parseCents(changedCentsInput.value);
-  if (isNaN(changedCents)) return;
-
-  const changedFreq = baseFreq * centsToRatio(changedCents);
-
-  // Calculate the sum of relative deltas from interval 1 to the changed interval
-  let sumRelativeDeltas = 0;
-  for (let i = 1; i <= intervalIndex; i++) {
-    const deltaInput = document.getElementById(`input-interval-${i}-delta`);
-    if (!deltaInput) continue;
-    const relativeDelta = parseFloat(deltaInput.value);
-    if (isNaN(relativeDelta)) continue;
-    sumRelativeDeltas += relativeDelta;
-  }
-
-  if (sumRelativeDeltas <= 0) return;
-
-  // Calculate new reference delta based on changed interval position
-  const firstDelta = (changedFreq - baseFreq) / sumRelativeDeltas;
-
-  if (firstDelta <= 0) return;
-
-  // Update ALL intervals (including ones above the changed interval) based on the new reference delta
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const deltaInput = document.getElementById(`input-interval-${i}-delta`);
-    const centsInput = document.getElementById(`input-interval-${i}-cents`);
-    const ratioInput = document.getElementById(`input-interval-${i}-ratio`);
-
-    if (!deltaInput || !centsInput || !ratioInput) continue;
-
-    const relativeDelta = parseFloat(deltaInput.value);
-    if (isNaN(relativeDelta)) continue;
-
-    // Calculate new frequency based on the stored delta ratio
-    const absoluteDelta = relativeDelta * firstDelta;
-    const prevFreq = getPreviousFrequency(i);
-    const newFreq = prevFreq + absoluteDelta;
-
-    // Update cents and ratio
-    const newCents = 1200 * Math.log2(newFreq / baseFreq);
-    centsInput.value = newCents.toFixed(3);
-    ratioInput.value = (newFreq / baseFreq).toFixed(6);
-  }
-}
-
-function updateFromDelta(intervalIndex) {
-  // When delta is updated, we need to recalculate the cents/ratio for this interval
-  // and all intervals above it, keeping intervals below fixed.
-  // The unit delta is determined from the previous delta signature.
-  
-  // Validate delta is positive
-  const deltaInput = document.getElementById(`input-interval-${intervalIndex}-delta`);
-  const deltaValue = parseFloat(deltaInput.value);
-  if (isNaN(deltaValue) || deltaValue <= 0) {
-    alert("Delta must be a positive number.");
-    return;
-  }
-  
-  const baseFreq = getBaseFrequency();
-  
-  // We need to determine the unit delta from the current chord state.
-  // The unit delta can be computed from any interval: unitDelta = absoluteDelta / relativeDelta
-  // We'll use the second interval if available, otherwise we can't determine the unit.
-  
-  let unitDelta;
-  
-  if (currentIntervalCount >= 2 && intervalIndex === 1) {
-    // Use the second interval to determine the unit delta
-    const secondCentsInput = document.getElementById("input-interval-2-cents");
-    const secondDeltaInput = document.getElementById("input-interval-2-delta");
-    const firstCentsInput = document.getElementById("input-interval-1-cents");
-    
-    const secondCents = parseCents(secondCentsInput.value);
-    const secondRelativeDelta = parseFloat(secondDeltaInput.value);
-    const firstCents = parseCents(firstCentsInput.value);
-    
-    if (isNaN(secondCents) || isNaN(secondRelativeDelta) || isNaN(firstCents) || secondRelativeDelta <= 0) return;
-    
-    const firstFreq = baseFreq * centsToRatio(firstCents);
-    const secondFreq = baseFreq * centsToRatio(secondCents);
-    const secondAbsoluteDelta = secondFreq - firstFreq;
-    
-    unitDelta = secondAbsoluteDelta / secondRelativeDelta;
-  } else if (intervalIndex === 1) {
-    // Only one interval exists, can't determine unit delta from other intervals
-    // In this case, the delta value acts as a direct scaling factor
-    const firstCentsInput = document.getElementById("input-interval-1-cents");
-    const firstDeltaInput = document.getElementById("input-interval-1-delta");
-    const firstCents = parseCents(firstCentsInput.value);
-    const newFirstDelta = parseFloat(firstDeltaInput.value);
-    
-    if (isNaN(firstCents) || isNaN(newFirstDelta) || newFirstDelta <= 0) return;
-    
-    // With only one interval and no reference, we assume the current absolute delta IS the unit
-    // So changing delta to N means scaling by N
-    const firstFreq = baseFreq * centsToRatio(firstCents);
-    const firstAbsoluteDelta = firstFreq - baseFreq;
-    unitDelta = firstAbsoluteDelta; // Assume old delta was 1
-  } else {
-    // For intervals other than the first, use the first interval to determine unit delta
-    const firstCentsInput = document.getElementById("input-interval-1-cents");
-    const firstDeltaInput = document.getElementById("input-interval-1-delta");
-    const firstCents = parseCents(firstCentsInput.value);
-    const firstRelativeDelta = parseFloat(firstDeltaInput.value) || 1;
-    
-    if (isNaN(firstCents)) return;
-    
-    const firstFreq = baseFreq * centsToRatio(firstCents);
-    const firstAbsoluteDelta = firstFreq - baseFreq;
-    unitDelta = firstAbsoluteDelta / firstRelativeDelta;
-  }
-  
-  if (unitDelta <= 0) return;
-  
-  // Recalculate cents/ratio for this interval and all intervals above it
-  for (let i = intervalIndex; i <= currentIntervalCount; i++) {
-    const iDeltaInput = document.getElementById(`input-interval-${i}-delta`);
-    const iCentsInput = document.getElementById(`input-interval-${i}-cents`);
-    const iRatioInput = document.getElementById(`input-interval-${i}-ratio`);
-    
-    if (!iDeltaInput || !iCentsInput || !iRatioInput) continue;
-    
-    const iRelativeDelta = parseFloat(iDeltaInput.value);
-    if (isNaN(iRelativeDelta)) continue;
-    
-    // Calculate new frequency based on the delta
-    const iAbsoluteDelta = iRelativeDelta * unitDelta;
-    const iPrevFreq = getPreviousFrequency(i);
-    const iNewFreq = iPrevFreq + iAbsoluteDelta;
-    
-    // Update cents and ratio
-    const iNewCents = 1200 * Math.log2(iNewFreq / baseFreq);
-    iCentsInput.value = iNewCents.toFixed(3);
-    iRatioInput.value = (iNewFreq / baseFreq).toFixed(6);
-  }
-  
-  refreshChordIfPlaying();
-}
-
-function updateAllDeltas() {
-  const baseFreq = getBaseFrequency();
-  
-  // Get the first interval's frequency difference (reference delta)
-  const firstCentsInput = document.getElementById("input-interval-1-cents");
-  const firstCents = parseCents(firstCentsInput.value);
-  if (isNaN(firstCents)) return;
-  
-  const firstFreq = baseFreq * centsToRatio(firstCents);
-  const firstDelta = firstFreq - baseFreq;
-  
-  if (firstDelta <= 0) return;
-  
-  // First interval always has relative delta = 1
-  const firstDeltaInput = document.getElementById("input-interval-1-delta");
-  if (firstDeltaInput) {
-    firstDeltaInput.value = "1";
-  }
-  
-  // Update all other intervals
-  for (let i = 2; i <= currentIntervalCount; i++) {
-    updateDeltaDisplay(i, firstDelta);
-  }
-}
-
-function updateDeltaDisplay(intervalIndex, firstDelta) {
-  const baseFreq = getBaseFrequency();
-  const centsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
-  const deltaInput = document.getElementById(`input-interval-${intervalIndex}-delta`);
-  
-  if (!centsInput || !deltaInput) return;
-  
-  const cents = parseCents(centsInput.value);
-  if (isNaN(cents)) return;
-  
-  const currentFreq = baseFreq * centsToRatio(cents);
-  const prevFreq = getPreviousFrequency(intervalIndex);
-  const absoluteDelta = currentFreq - prevFreq;
-  
-  const relativeDelta = absoluteDelta / firstDelta;
-  deltaInput.value = relativeDelta.toFixed(6);
-}
-
-// Recalculate ratios and deltas from current cents values
-function recalcFromCents() {
-  // Validate all cents values first
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const centsInput = document.getElementById(`input-interval-${i}-cents`);
-    if (!centsInput) continue;
-    
-    const cents = parseCents(centsInput.value);
-    if (isNaN(cents) || cents <= 0) {
-      alert(`Interval ${i}: Cents must be a positive number.`);
-      return;
-    }
-  }
-  
-  // Sync all ratios from cents
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const centsInput = document.getElementById(`input-interval-${i}-cents`);
-    const ratioInput = document.getElementById(`input-interval-${i}-ratio`);
-    
-    if (!centsInput || !ratioInput) continue;
-    
-    const cents = parseCents(centsInput.value);
-    if (isNaN(cents)) continue;
-    
-    // Update the input to show the computed cents value (in case EDO notation was used)
-    centsInput.value = cents.toFixed(3);
-    
-    // Update ratio to match cents
-    const ratio = centsToRatio(cents);
-    ratioInput.value = ratio.toFixed(6);
-  }
-  
-  // Recalculate all deltas based on current cents values
-  updateAllDeltas();
-  refreshChordIfPlaying();
-}
-
-// Recalculate cents and deltas from current ratio values
-function recalcFromRatios() {
-  // Validate all ratio values first
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const ratioInput = document.getElementById(`input-interval-${i}-ratio`);
-    if (!ratioInput) continue;
-    
-    const cents = ratioToCents(ratioInput.value);
-    if (isNaN(cents) || cents <= 0) {
-      alert(`Interval ${i}: Ratio must be greater than 1.`);
-      return;
-    }
-  }
-  
-  // Sync all cents from ratios
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const centsInput = document.getElementById(`input-interval-${i}-cents`);
-    const ratioInput = document.getElementById(`input-interval-${i}-ratio`);
-    
-    if (!centsInput || !ratioInput) continue;
-    
-    const cents = ratioToCents(ratioInput.value);
-    if (isNaN(cents)) continue;
-    
-    // Update cents to match ratio
-    centsInput.value = cents.toFixed(3);
-  }
-  
-  // Recalculate all deltas based on current cents values
-  updateAllDeltas();
-  refreshChordIfPlaying();
-}
-
-// Update all intervals from their delta values, keeping the first interval fixed
-function updateAllFromDeltas() {
-  const baseFreq = getBaseFrequency();
-
-  // Get the last interval's frequency (the outer interval we want to preserve)
-  const lastCentsInput = document.getElementById(`input-interval-${currentIntervalCount}-cents`);
-  const lastCents = parseCents(lastCentsInput.value);
-  if (isNaN(lastCents)) return;
-
-  const lastFreq = baseFreq * centsToRatio(lastCents);
-
-  // Calculate the sum of all relative deltas
-  let sumRelativeDeltas = 0;
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const deltaInput = document.getElementById(`input-interval-${i}-delta`);
-    if (!deltaInput) continue;
-    const relativeDelta = parseFloat(deltaInput.value);
-    if (isNaN(relativeDelta)) continue;
-    sumRelativeDeltas += relativeDelta;
-  }
-
-  if (sumRelativeDeltas <= 0) return;
-
-  // Calculate the reference delta that makes the outer interval match
-  const refDelta = (lastFreq - baseFreq) / sumRelativeDeltas;
-
-  if (refDelta <= 0) return;
-
-  // Recalculate ALL intervals based on their delta values
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const deltaInput = document.getElementById(`input-interval-${i}-delta`);
-    const centsInput = document.getElementById(`input-interval-${i}-cents`);
-    const ratioInput = document.getElementById(`input-interval-${i}-ratio`);
-
-    if (!deltaInput || !centsInput || !ratioInput) continue;
-
-    const relativeDelta = parseFloat(deltaInput.value);
-    if (isNaN(relativeDelta)) continue;
-
-    // Calculate new frequency based on the delta
-    const absoluteDelta = relativeDelta * refDelta;
-    const prevFreq = getPreviousFrequency(i);
-    const newFreq = prevFreq + absoluteDelta;
-
-    // Update cents and ratio
-    const newCents = 1200 * Math.log2(newFreq / baseFreq);
-    centsInput.value = newCents.toFixed(3);
-    ratioInput.value = (newFreq / baseFreq).toFixed(6);
-  }
-
-  refreshChordIfPlaying();
-}
-
-// ============ Event Listener Setup ============
-
-function attachIntervalListeners(intervalIndex) {
-  const intervalBtn = document.getElementById(`btn-update-interval-${intervalIndex}`);
-  const deltaBtn = document.getElementById(`btn-update-delta-${intervalIndex}`);
-  const centsInput = document.getElementById(`input-interval-${intervalIndex}-cents`);
-  const ratioInput = document.getElementById(`input-interval-${intervalIndex}-ratio`);
-
-  if (intervalBtn) {
-    intervalBtn.addEventListener("click", () => updateFromCents(intervalIndex));
-  }
-  if (deltaBtn) {
-    deltaBtn.addEventListener("click", () => updateFromDelta(intervalIndex));
-  }
-
-  // Sync cents and ratio inputs in real-time
-  if (centsInput) {
-    centsInput.addEventListener("input", () => {
-      const cents = parseCents(centsInput.value);
-      if (!isNaN(cents) && cents > 0) {
-        const ratio = centsToRatio(cents);
-        ratioInput.value = ratio.toFixed(6);
-      }
-    });
-  }
-  if (ratioInput) {
-    ratioInput.addEventListener("input", () => {
-      const cents = ratioToCents(ratioInput.value);
-      if (!isNaN(cents) && cents > 0) {
-        centsInput.value = cents.toFixed(3);
-      }
-    });
-  }
-}
-
-// Attach listeners for the first interval
-attachIntervalListeners(1);
-
-// Initialize first interval from cents
-updateFromCents(1);
-
-const btnAddInterval = document.getElementById("btn-add-interval");
-const btnRemoveInterval = document.getElementById("btn-remove-interval");
-const btnClearIntervals = document.getElementById("btn-clear-intervals");
-
-btnAddInterval.addEventListener("click", () => {
-  currentIntervalCount++;
-  const intervalTable = document.getElementById("intervals");
-  const newRow = document.createElement("tr");
-  newRow.innerHTML = (`
-          <td>
-            <input
-              type="text"
-              id="input-interval-${currentIntervalCount}-cents"
-              name="input-interval-${currentIntervalCount}-cents"
-              style="width: 80px"
-            />
-            Interval (cents or a\\n, from root)
-            <br/>
-            <input
-              type="text"
-              id="input-interval-${currentIntervalCount}-ratio"
-              name="input-interval-${currentIntervalCount}-ratio"
-              style="width: 80px"
-            />
-            Ratio (from root)
-            <br/>
-            <button id="btn-update-interval-${currentIntervalCount}">Update (keep deltas)</button>
-            <br/>
-          </td>
-          <td>
-            <input
-              type="number"
-              id="input-interval-${currentIntervalCount}-delta"
-              name="input-interval-${currentIntervalCount}-delta"
-              value="1"
-              style="width: 80px"
-            />
-            Delta
-            <button id="btn-update-delta-${currentIntervalCount}">Update (keep other deltas)</button>
-            <input
-              type="number"
-              id="input-interval-${currentIntervalCount}-target-delta"
-              name="input-interval-${currentIntervalCount}-target-delta"
-              value="1"
-              style="width: 80px"
-            />
-            Target delta
-            <br/>
-            <input
-              type="checkbox"
-              id="input-interval-${currentIntervalCount}-free"
-              name="input-interval-${currentIntervalCount}-free"
-            />
-            Free (+?)
-          </td>
-          `
-      );
-  intervalTable.appendChild(newRow);
-
-  // Attach event listeners for the new interval
-  attachIntervalListeners(currentIntervalCount);
-
-  // Initialize new interval from delta
-  updateFromDelta(currentIntervalCount);
-});
-
-btnRemoveInterval.addEventListener("click", () => {
-  if (currentIntervalCount > 1) {
-    const intervalTable = document.getElementById("intervals");
-    intervalTable.removeChild(intervalTable.lastElementChild);
-    currentIntervalCount--;
-    refreshChordIfPlaying();
-  }
-});
-
-btnClearIntervals.addEventListener("click", () => {
-  while (currentIntervalCount > 1) {
-    const intervalTable = document.getElementById("intervals");
-    intervalTable.removeChild(intervalTable.lastElementChild);
-    currentIntervalCount--;
-  }
-  refreshChordIfPlaying();
-});
-
-// ============ Audio Control Event Listeners ============
-
-document.getElementById("btn-play-chord").addEventListener("click", playChord);
-document.getElementById("btn-stop-chord").addEventListener("click", stopChord);
-
-// Waveform selection
-document.getElementById("waveform-select").addEventListener("change", (e) => {
-  setWaveform(e.target.value);
-});
-
-// Refresh chord when base frequency changes
-document.getElementById("input-base-frequency").addEventListener("input", refreshChordIfPlaying);
-
-// ============ Least-Squares Linear Error ============
-
-/**
- * Calculate the least-squares error for approximating a target delta signature (FDR).
- * This is a UI wrapper that extracts data from the DOM and calls the pure FDR function from fdr.js.
- *
- * @param {string} domain - "linear" or "log" (logarithmic)
- * @param {string} model - "rooted", "pairwise", or "all-steps"
- * @returns {Object|null} - {error, x, targetRatios, deltaSignature} or null if error
- */
-function calculateFDRErrorUI(domain, model) {
-  // Extract chord data from DOM
-  const ratios = [];
-  const targetDeltas = [];
-
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const centsInput = document.getElementById(`input-interval-${i}-cents`);
-    const targetDeltaInput = document.getElementById(`input-interval-${i}-target-delta`);
-
-    if (!centsInput || !targetDeltaInput) continue;
-
-    const cents = parseCents(centsInput.value);
-    const targetDelta = parseFloat(targetDeltaInput.value);
-
-    if (isNaN(cents) || isNaN(targetDelta)) continue;
-
-    const r_i = centsToRatio(cents);
-    ratios.push(r_i);
-    targetDeltas.push(targetDelta);
-  }
-
-  if (ratios.length === 0) {
-    document.getElementById("ls-error").textContent = "—";
-    return null;
-  }
-
-  // Call the pure FDR calculation function from fdr.js
-  const result = calculateFDRError(ratios, targetDeltas, domain, model);
-
-  // Compute target ratios for visualization
-  const cumulativeDeltas = [];
-  let cumSum = 0;
-  for (let i = 0; i < targetDeltas.length; i++) {
-    cumSum += targetDeltas[i];
-    cumulativeDeltas.push(cumSum);
-  }
-
-  const targetRatios = [1]; // Root
-  for (let i = 0; i < targetDeltas.length; i++) {
-    targetRatios.push(1 + cumulativeDeltas[i] / result.x);
-  }
-
-  // Build delta signature string
-  const deltaSignature = "+" + targetDeltas.join("+");
-
-  // Store target ratios for visualization
-  // For FDR, no notes are free (all deltas are fixed)
-  targetRatios.isFree = Array(targetRatios.length).fill(false);
-  targetRatiosForViz = targetRatios;
-
-  // Build target ratios string
-  const ratioStr = targetRatios.slice(1).map(r => r.toFixed(6)).join(" : ");
-
-  // Display result
-  const errorStr = result.error.toFixed(domain === "log" ? 3 : 6) + (domain === "log" ? " ¢" : "");
-  document.getElementById("ls-error").innerHTML = `<table><tr><th>error</th><td>${errorStr}<br/></td></tr><tr><th>x</th><td>${result.x.toFixed(4)}</td></tr><tr><th>target chord</th><td>1 : ${ratioStr}</td></tr><tr><th>target deltas</th><td>${deltaSignature}</td></tr></table>`;
-
-  // Update visualization
-  updateVisualization();
-
-  return { error: result.error, x: result.x, targetRatios, deltaSignature };
-}
-
-// ============ PDR Error Calculation ============
-
-/**
- * Calculate PDR (Partially Delta-Rational) least-squares error.
- * This is a UI wrapper that extracts data from the DOM and calls the pure PDR function from pdr.js.
- *
- * @param {string} domain - "linear" or "log" (logarithmic)
- * @param {string} model - "rooted", "pairwise", or "all-steps"
- * @returns {{error: number, x: number, freeValues: number[]}|null} - Result or null if error
- */
-function calculatePDRErrorUI(domain, model) {
-  // Extract chord data from DOM
-  const intervalsFromRoot = [];
-  const targetDeltas = [];
-  const isFree = [];
-
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const centsInput = document.getElementById(`input-interval-${i}-cents`);
-    const targetDeltaInput = document.getElementById(`input-interval-${i}-target-delta`);
-    const freeCheckbox = document.getElementById(`input-interval-${i}-free`);
-
-    if (!centsInput || !targetDeltaInput) continue;
-
-    const cents = parseCents(centsInput.value);
-    const targetDelta = parseFloat(targetDeltaInput.value);
-    const checkboxFree = freeCheckbox ? freeCheckbox.checked : false;
-
-    if (isNaN(cents)) continue;
-
-    // Treat as free if checkbox is checked OR if target delta is invalid/empty
-    const free = checkboxFree || isNaN(targetDelta);
-
-    const ratio = centsToRatio(cents);
-    intervalsFromRoot.push(ratio);
-    targetDeltas.push(isNaN(targetDelta) ? 1 : targetDelta);
-    isFree.push(free);
-  }
-
-  // Call the pure PDR calculation function from pdr.js
-  return calculatePDRError(intervalsFromRoot, targetDeltas, isFree, domain, model);
-}
-
-
-// ============ Error Calculation Dispatcher ============
-
-// Least-squares error function that handles both FDR and PDR
-function calculateLeastSquaresError() {
-  // Read domain and model from selectors
-  const domain = document.getElementById("error-domain").value;
-  const model = document.getElementById("error-model").value;
-
-  // Check if any deltas are free
-  let hasFreeDeltas = false;
-  for (let i = 1; i <= currentIntervalCount; i++) {
-    const freeCheckbox = document.getElementById(`input-interval-${i}-free`);
-    if (freeCheckbox && freeCheckbox.checked) {
-      hasFreeDeltas = true;
-      break;
-    }
-  }
-
-  if (hasFreeDeltas) {
-    const result = calculatePDRErrorUI(domain, model);
-    if (result === null) {
-      document.getElementById("ls-error").textContent = "undefined";
+  },
+
+  ratioToCents(ratio) {
+    let value;
+    if (typeof ratio === "string" && ratio.includes("/")) {
+      const parts = ratio.split("/");
+      value = parseFloat(parts[0]) / parseFloat(parts[1]);
     } else {
-      // Build delta signature string for display (all intervals)
-      // First, reconstruct the per-interval delta values using the segment structure
-      // Build a map of which segment each included interval belongs to
-      // Use original proportions to preserve internal structure
-      const intervalToSegment = new Map();
-      result.interiorFreeSegments.forEach((seg, segIdx) => {
-        const totalOptimized = result.freeValues[segIdx];
-        const proportions = result.freeSegmentProportions[segIdx];
-        let idx = 0;
-        for (let i = seg.start; i <= seg.end; i++) {
-          intervalToSegment.set(i, totalOptimized * proportions[idx]);
-          idx++;
-        }
-      });
-
-      // Build display string for each interval
-      const displayDeltas = [];
-      for (let i = 1; i <= currentIntervalCount; i++) {
-        const freeCheckbox = document.getElementById(`input-interval-${i}-free`);
-        const targetDeltaInput = document.getElementById(`input-interval-${i}-target-delta`);
-        const isFree = freeCheckbox && freeCheckbox.checked;
-        const intervalIdx = i - 1; // 0-indexed
-        const isIncluded = intervalIdx >= result.firstIncludedInterval &&
-                          intervalIdx <= result.lastIncludedInterval;
-
-        if (isFree && isIncluded) {
-          // For included free deltas, show the per-interval optimized value
-          const includedIdx = intervalIdx - result.firstIncludedInterval;
-          if (intervalToSegment.has(includedIdx)) {
-            displayDeltas.push(intervalToSegment.get(includedIdx).toFixed(4) + "?");
-          } else {
-            displayDeltas.push("?");
-          }
-        } else if (isFree) {
-          // For trimmed free deltas, just show "?"
-          displayDeltas.push("?");
-        } else {
-          const val = parseFloat(targetDeltaInput?.value);
-          displayDeltas.push(isNaN(val) ? "?" : val.toString());
-        }
-      }
-      const deltaSignature = "+" + displayDeltas.join("+");
-
-      // Reconstruct target ratios for visualization
-      // Reconstruct deltas for the included range with free values filled in
-      // Initialize with target deltas
-      const includedDeltas = result.includedTargetDeltas.slice();
-
-      // Fill in free segments using the segment structure
-      // Preserve original proportions within each free segment
-      result.interiorFreeSegments.forEach((seg, segIdx) => {
-        const totalOptimized = result.freeValues[segIdx];
-        const proportions = result.freeSegmentProportions[segIdx];
-        let idx = 0;
-        for (let i = seg.start; i <= seg.end; i++) {
-          includedDeltas[i] = totalOptimized * proportions[idx];
-          idx++;
-        }
-      });
-
-      // Compute target ratios for included range (relative to rebased root)
-      let cumDelta = 0;
-      const includedTargetRatios = [];
-      for (let i = 0; i < includedDeltas.length; i++) {
-        cumDelta += includedDeltas[i];
-        includedTargetRatios.push(1 + cumDelta / result.x);
-      }
-
-      // Get the rebasing ratio (ratio of the first note in included range)
-      // This is the note that serves as the root for the PDR optimization
-      let rebaseRatio = 1.0;
-      if (result.firstIncludedInterval > 0) {
-        // The rebased root is at the interval just before firstIncludedInterval
-        // Intervals are 1-indexed in the UI, so interval i in the UI = array index i-1
-        // So if firstIncludedInterval (array index) = 1, we want UI interval 1 (array index 0)
-        const uiIntervalNumber = result.firstIncludedInterval;
-        const centsInput = document.getElementById(`input-interval-${uiIntervalNumber}-cents`);
-        if (centsInput) {
-          const cents = parseCents(centsInput.value);
-          if (!isNaN(cents)) {
-            rebaseRatio = centsToRatio(cents);
-          }
-        }
-      }
-
-      // Build targetRatiosForViz array with same structure as actual chord
-      // The actual chord has structure: [root, interval1, interval2, ..., intervalN]
-      // where intervalI is the cumulative ratio for the I-th interval above root
-
-      // Also track which notes are "free" (part of free segments)
-      const targetIsFree = [];
-
-      targetRatiosForViz = [];
-
-      // First, handle the original root (note at ratio 1)
-      // Always show the root, even when there's a leading free segment
-      targetRatiosForViz.push(1);
-      targetIsFree.push(false); // Root is never free
-
-      // Build a set of included interval indices that are part of free segments
-      // For a segment [start, end], only notes at start, start+1, ..., end-1 are truly free
-      // The note at position end is constrained by the optimized segment total
-      const freeIntervalIndices = new Set();
-      result.interiorFreeSegments.forEach(seg => {
-        for (let i = seg.start; i < seg.end; i++) {  // Changed <= to <
-          freeIntervalIndices.add(i);
-        }
-      });
-
-      // Get all actual chord ratios for visualization
-      const actualChordRatios = [1]; // Root
-      for (let i = 1; i <= currentIntervalCount; i++) {
-        const centsInput = document.getElementById(`input-interval-${i}-cents`);
-        if (centsInput) {
-          const cents = parseCents(centsInput.value);
-          if (!isNaN(cents)) {
-            actualChordRatios.push(centsToRatio(cents));
-          }
-        }
-      }
-
-      // Then, handle each interval above the root
-      for (let intervalIdx = 0; intervalIdx < currentIntervalCount; intervalIdx++) {
-        if (intervalIdx < result.firstIncludedInterval) {
-          // Before the included range (leading free segment)
-          if (intervalIdx === result.firstIncludedInterval - 1) {
-            // This is the rebased root (the note just before the included range starts)
-            targetRatiosForViz.push(rebaseRatio);
-            targetIsFree.push(false); // Rebased root is not free
-          } else {
-            // Leading free segment notes - show at actual position, marked as free
-            const freeCheckbox = document.getElementById(`input-interval-${intervalIdx + 1}-free`);
-            const isFreeLeading = freeCheckbox && freeCheckbox.checked;
-
-            if (isFreeLeading && actualChordRatios[intervalIdx + 1]) {
-              targetRatiosForViz.push(actualChordRatios[intervalIdx + 1]);
-              targetIsFree.push(true); // Leading free notes are free
-            } else {
-              targetRatiosForViz.push(null);
-              targetIsFree.push(false);
-            }
-          }
-        } else if (intervalIdx <= result.lastIncludedInterval) {
-          // Within the included range
-          const includedIdx = intervalIdx - result.firstIncludedInterval;
-          targetRatiosForViz.push(rebaseRatio * includedTargetRatios[includedIdx]);
-          // Check if this interval is part of a free segment
-          targetIsFree.push(freeIntervalIndices.has(includedIdx));
-        } else {
-          // After the included range - trailing free segment
-          // Show at actual position, marked as free
-          const freeCheckbox = document.getElementById(`input-interval-${intervalIdx + 1}-free`);
-          const isFreeTrailing = freeCheckbox && freeCheckbox.checked;
-
-          if (isFreeTrailing && actualChordRatios[intervalIdx + 1]) {
-            targetRatiosForViz.push(actualChordRatios[intervalIdx + 1]);
-            targetIsFree.push(true); // Trailing free notes are free
-          } else {
-            targetRatiosForViz.push(null);
-            targetIsFree.push(false);
-          }
-        }
-      }
-
-      // Store the free flags for visualization
-      targetRatiosForViz.isFree = targetIsFree;
-
-      // Build target ratios string (skip the root at index 0, show non-null ratios)
-      const ratioStr = targetRatiosForViz.slice(1)
-        .map(r => r !== null ? r.toFixed(6) : "—")
-        .join(" : ");
-
-      const errorStr = "error: " + result.error.toFixed(domain === "log" ? 3 : 6) + (domain === "log" ? " ¢" : "");
-      let display = `<table><tr><th>error</th><td>${errorStr}<br/></td></tr><tr><th>x</th><td>${result.x.toFixed(4)}</td></tr><tr><th>target chord</th><td>1 : ${ratioStr}</td></tr><tr><th>target deltas</th><td>${deltaSignature}</td></tr></table>`;
-      document.getElementById("ls-error").innerHTML = display;
-
-      // Update visualization to show target
-      updateVisualization();
+      value = parseFloat(ratio);
     }
-  } else {
-    // No free deltas, use FDR calculation
-    calculateFDRErrorUI(domain, model);
+    if (isNaN(value) || value <= 0) return NaN;
+    return 1200 * Math.log2(value);
+  },
+
+  centsToRatio(cents) {
+    return Math.pow(2, cents / 1200);
   }
-}
+};
 
-// Set up event listeners
-document.getElementById("btn-recalc-deltas").addEventListener("click", recalcFromCents);
-document.getElementById("btn-update-from-deltas").addEventListener("click", updateAllFromDeltas);
-document.getElementById("btn-calculate-error").addEventListener("click", calculateLeastSquaresError);
+// ============ Audio System ============
 
-// Clear target chord from visualization
-document.getElementById("btn-clear-target").addEventListener("click", () => {
-  targetRatiosForViz = null;
-  updateVisualization();
-});
+const Audio = {
+  getContext() {
+    if (!AppState.audioContext) {
+      AppState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return AppState.audioContext;
+  },
 
-// ============ Chord Visualization ============
+  createSemisineWave(ctx) {
+    const length = 4096;
+    const real = new Float32Array(length);
+    const imag = new Float32Array(length);
+    real[0] = 0;
+    imag[0] = 0;
+    real[1] = 0;
+    imag[1] = 0.5;
+    for (let n = 2; n < length; n++) {
+      if (n % 2 === 0) {
+        real[n] = 2 / (Math.PI * (1 - n * n));
+        imag[n] = 0;
+      } else {
+        real[n] = 0;
+        imag[n] = 0;
+      }
+    }
+    return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+  },
 
-// Track which viz window input was last edited
-let vizWindowSource = "ratio"; // "ratio" or "cents"
+  createOscillator(frequency, waveform) {
+    const ctx = this.getContext();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
 
-function getVizWindow() {
-  if (vizWindowSource === "cents") {
-    const centsInput = document.getElementById("viz-window-cents").value;
+    if (waveform === "semisine") {
+      oscillator.setPeriodicWave(this.createSemisineWave(ctx));
+    } else {
+      oscillator.type = waveform;
+    }
+
+    oscillator.frequency.setValueAtTime(frequency, ctx.currentTime);
+    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    return { oscillator, gainNode };
+  },
+
+  playFrequencies(frequencies) {
+    this.stop();
+
+    const ctx = this.getContext();
+    if (ctx.state === "suspended") {
+      ctx.resume();
+    }
+
+    AppState.isPlaying = true;
+    const numNotes = frequencies.length;
+
+    frequencies.forEach((freq) => {
+      const { oscillator, gainNode } = this.createOscillator(freq, AppState.currentWaveform);
+      gainNode.gain.setValueAtTime(0.3 / Math.sqrt(numNotes), ctx.currentTime);
+      oscillator.start();
+      AppState.activeOscillators.push({ oscillator, gainNode });
+    });
+  },
+
+  stop() {
+    const ctx = this.getContext();
+    AppState.activeOscillators.forEach(({ oscillator, gainNode }) => {
+      gainNode.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+      oscillator.stop(ctx.currentTime + 0.1);
+    });
+    AppState.activeOscillators = [];
+    AppState.isPlaying = false;
+  },
+
+  setWaveform(waveform, tabPrefix) {
+    AppState.currentWaveform = waveform;
+    // Sync waveform selector in other tab
+    const otherPrefix = tabPrefix === 'build' ? 'measure' : 'build';
+    const otherSelect = document.getElementById(`${otherPrefix}-waveform`);
+    if (otherSelect) {
+      otherSelect.value = waveform;
+    }
+  }
+};
+
+// ============ Visualization System ============
+
+const Visualization = {
+  // Track which input was last edited per tab
+  vizWindowSource: {
+    build: 'ratio',
+    measure: 'ratio'
+  },
+
+  // Target ratios per tab
+  targetRatios: {
+    build: null,
+    measure: null
+  },
+
+  getWindow(tabPrefix) {
+    const source = this.vizWindowSource[tabPrefix];
+    if (source === "cents") {
+      const centsInput = document.getElementById(`${tabPrefix}-viz-window-cents`).value;
+      const cents = parseFloat(centsInput);
+      if (!isNaN(cents) && cents > 0) {
+        return Math.pow(2, cents / 1200);
+      }
+      return 2;
+    }
+
+    const input = document.getElementById(`${tabPrefix}-viz-window`).value;
+    if (input.includes("/")) {
+      const parts = input.split("/");
+      const num = parseFloat(parts[0]);
+      const den = parseFloat(parts[1]);
+      if (!isNaN(num) && !isNaN(den) && den > 0) {
+        return num / den;
+      }
+    }
+    const val = parseFloat(input);
+    return isNaN(val) || val <= 1 ? 2 : val;
+  },
+
+  syncWindowFromRatio(tabPrefix) {
+    const ratio = this.getWindow(tabPrefix);
+    const cents = 1200 * Math.log2(ratio);
+    document.getElementById(`${tabPrefix}-viz-window-cents`).value = cents.toFixed(2);
+  },
+
+  syncWindowFromCents(tabPrefix) {
+    const centsInput = document.getElementById(`${tabPrefix}-viz-window-cents`).value;
     const cents = parseFloat(centsInput);
     if (!isNaN(cents) && cents > 0) {
-      return Math.pow(2, cents / 1200);
+      const ratio = Math.pow(2, cents / 1200);
+      document.getElementById(`${tabPrefix}-viz-window`).value = ratio.toFixed(6);
     }
-    return 2; // Default to 2/1
-  }
-  
-  const input = document.getElementById("viz-window").value;
-  // Parse as ratio (e.g., "2/1" or "3/2" or just "2")
-  if (input.includes("/")) {
-    const parts = input.split("/");
-    const num = parseFloat(parts[0]);
-    const den = parseFloat(parts[1]);
-    if (!isNaN(num) && !isNaN(den) && den > 0) {
-      return num / den;
+  },
+
+  update(tabPrefix) {
+    const tabModule = tabPrefix === 'build' ? BuildTab : MeasureTab;
+    const frequencies = tabModule.getChordFrequencies();
+    if (frequencies.length === 0) return;
+
+    const baseFreq = frequencies[0];
+    const windowRatio = this.getWindow(tabPrefix);
+    const windowCents = 1200 * Math.log2(windowRatio);
+    const ratios = frequencies.map(f => f / baseFreq);
+    const targetRatios = this.targetRatios[tabPrefix];
+
+    this.drawLinear(`${tabPrefix}-viz-linear`, ratios, windowRatio, targetRatios);
+    this.drawLog(`${tabPrefix}-viz-log`, ratios, windowCents, targetRatios);
+  },
+
+  drawLinear(svgId, ratios, windowRatio, targetRatios) {
+    const svg = document.getElementById(svgId);
+    if (!svg) return;
+    const width = svg.clientWidth || 400;
+    const height = 60;
+    svg.innerHTML = "";
+
+    const padding = 20;
+    const lineY = height / 2;
+    const usableWidth = width - 2 * padding;
+
+    // Draw axis line
+    const axis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    axis.setAttribute("x1", padding);
+    axis.setAttribute("y1", lineY);
+    axis.setAttribute("x2", width - padding);
+    axis.setAttribute("y2", lineY);
+    axis.setAttribute("class", "viz-axis");
+    svg.appendChild(axis);
+
+    // Draw tick marks
+    for (let t = 1; t <= windowRatio; t += 0.1) {
+      const x = padding + ((t - 1) / (windowRatio - 1)) * usableWidth;
+      const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      tick.setAttribute("x1", x);
+      tick.setAttribute("y1", lineY - 4);
+      tick.setAttribute("x2", x);
+      tick.setAttribute("y2", lineY + 4);
+      tick.setAttribute("class", "viz-tick");
+      svg.appendChild(tick);
     }
-  }
-  const val = parseFloat(input);
-  return isNaN(val) || val <= 1 ? 2 : val;
-}
 
-function syncVizWindowFromRatio() {
-  const ratio = getVizWindow();
-  const cents = 1200 * Math.log2(ratio);
-  document.getElementById("viz-window-cents").value = cents.toFixed(2);
-}
+    // Major ticks at integers
+    for (let t = 1; t <= windowRatio; t += 1) {
+      const x = padding + ((t - 1) / (windowRatio - 1)) * usableWidth;
+      const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      tick.setAttribute("x1", x);
+      tick.setAttribute("y1", lineY - 8);
+      tick.setAttribute("x2", x);
+      tick.setAttribute("y2", lineY + 8);
+      tick.setAttribute("class", "viz-tick");
+      svg.appendChild(tick);
 
-function syncVizWindowFromCents() {
-  const centsInput = document.getElementById("viz-window-cents").value;
-  const cents = parseFloat(centsInput);
-  if (!isNaN(cents) && cents > 0) {
-    const ratio = Math.pow(2, cents / 1200);
-    document.getElementById("viz-window").value = ratio.toFixed(6);
-  }
-}
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", x);
+      label.setAttribute("y", lineY + 22);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("class", "viz-label-text");
+      label.textContent = t.toString();
+      svg.appendChild(label);
+    }
 
-function updateVisualization() {
-  const frequencies = getChordFrequencies();
-  if (frequencies.length === 0) return;
-  
-  const baseFreq = frequencies[0];
-  const windowRatio = getVizWindow();
-  const windowCents = 1200 * Math.log2(windowRatio);
-  
-  // Get ratios relative to base
-  const ratios = frequencies.map(f => f / baseFreq);
-  
-  drawLinearViz(ratios, windowRatio, targetRatiosForViz);
-  drawLogViz(ratios, windowCents, targetRatiosForViz);
-}
-
-function drawLinearViz(ratios, windowRatio, targetRatios) {
-  const svg = document.getElementById("viz-linear");
-  const width = svg.clientWidth || 400;
-  const height = 60;
-  
-  // Clear existing content
-  svg.innerHTML = "";
-  
-  const padding = 20;
-  const lineY = height / 2;
-  const usableWidth = width - 2 * padding;
-  
-  // Draw axis line
-  const axis = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  axis.setAttribute("x1", padding);
-  axis.setAttribute("y1", lineY);
-  axis.setAttribute("x2", width - padding);
-  axis.setAttribute("y2", lineY);
-  axis.setAttribute("class", "viz-axis");
-  svg.appendChild(axis);
-  
-  // Draw tick marks at 0.1 increments
-  const tickInterval = 0.1;
-  for (let t = 1; t <= windowRatio; t += tickInterval) {
-    const x = padding + ((t - 1) / (windowRatio - 1)) * usableWidth;
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", x);
-    tick.setAttribute("y1", lineY - 4);
-    tick.setAttribute("x2", x);
-    tick.setAttribute("y2", lineY + 4);
-    tick.setAttribute("class", "viz-tick");
-    svg.appendChild(tick);
-  }
-  
-  // Draw medium tick marks at 0.5 increments with labels (skip integers)
-  for (let t = 1; t <= windowRatio; t += 0.5) {
-    // Skip integers (handled by major ticks) and endpoints
-    if (Math.abs(t - Math.round(t)) < 0.01) continue;
-    
-    const x = padding + ((t - 1) / (windowRatio - 1)) * usableWidth;
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", x);
-    tick.setAttribute("y1", lineY - 6);
-    tick.setAttribute("x2", x);
-    tick.setAttribute("y2", lineY + 6);
-    tick.setAttribute("class", "viz-tick");
-    svg.appendChild(tick);
-    
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", x);
-    label.setAttribute("y", lineY + 20);
-    label.setAttribute("text-anchor", "middle");
-    label.setAttribute("class", "viz-label-text");
-    label.textContent = t.toFixed(1);
-    svg.appendChild(label);
-  }
-  
-  // Draw major tick marks and labels at every integer ratio (1, 2, 3, ...)
-  for (let t = 1; t <= windowRatio; t += 1) {
-    const x = padding + ((t - 1) / (windowRatio - 1)) * usableWidth;
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", x);
-    tick.setAttribute("y1", lineY - 8);
-    tick.setAttribute("x2", x);
-    tick.setAttribute("y2", lineY + 8);
-    tick.setAttribute("class", "viz-tick");
-    svg.appendChild(tick);
-    
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", x);
-    label.setAttribute("y", lineY + 22);
-    label.setAttribute("text-anchor", "middle");
-    label.setAttribute("class", "viz-label-text");
-    label.textContent = t.toString();
-    svg.appendChild(label);
-  }
-  
-  // Draw points for each ratio
-  ratios.forEach((r, i) => {
-    if (r < 1 || r > windowRatio) return; // Outside window
-    const x = padding + ((r - 1) / (windowRatio - 1)) * usableWidth;
-    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("cx", x);
-    circle.setAttribute("cy", lineY);
-    circle.setAttribute("r", i === 0 ? 6 : 5);
-    circle.setAttribute("class", i === 0 ? "viz-root" : "viz-point");
-    svg.appendChild(circle);
-  });
-  
-  // Draw target ratios if available
-  if (targetRatios && targetRatios.length > 0) {
-    const isFreeArray = targetRatios.isFree || [];
-    targetRatios.forEach((r, i) => {
-      if (r === null || r === undefined) return; // No target for this interval
-      // Allow small tolerance for numerical precision
-      if (r < 0.999 || r > windowRatio * 1.001) return; // Outside window
+    // Draw chord points
+    ratios.forEach((r, i) => {
+      if (r < 1 || r > windowRatio) return;
       const x = padding + ((r - 1) / (windowRatio - 1)) * usableWidth;
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("cx", x);
       circle.setAttribute("cy", lineY);
-      circle.setAttribute("r", i === 0 ? 8 : 7);
-
-      // Choose class based on whether this is a free note
-      let circleClass;
-      if (i === 0) {
-        circleClass = "viz-target-root";
-      } else if (isFreeArray[i]) {
-        circleClass = "viz-target-free";
-      } else {
-        circleClass = "viz-target";
-      }
-      circle.setAttribute("class", circleClass);
+      circle.setAttribute("r", i === 0 ? 6 : 5);
+      circle.setAttribute("class", i === 0 ? "viz-root" : "viz-point");
       svg.appendChild(circle);
     });
-  }
-}
 
-function drawLogViz(ratios, windowCents, targetRatios) {
-  const svg = document.getElementById("viz-log");
-  const width = svg.clientWidth || 400;
-  const height = 60;
-  
-  // Clear existing content
-  svg.innerHTML = "";
-  
-  const padding = 20;
-  const lineY = height / 2;
-  const usableWidth = width - 2 * padding;
-  
-  // Draw axis line
-  const axis = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  axis.setAttribute("x1", padding);
-  axis.setAttribute("y1", lineY);
-  axis.setAttribute("x2", width - padding);
-  axis.setAttribute("y2", lineY);
-  axis.setAttribute("class", "viz-axis");
-  svg.appendChild(axis);
-  
-  // Draw tick marks at 100-cent increments
-  const tickInterval = 100;
-  for (let t = 0; t <= windowCents; t += tickInterval) {
-    const x = padding + (t / windowCents) * usableWidth;
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", x);
-    tick.setAttribute("y1", lineY - 4);
-    tick.setAttribute("x2", x);
-    tick.setAttribute("y2", lineY + 4);
-    tick.setAttribute("class", "viz-tick");
-    svg.appendChild(tick);
-  }
-  
-  // Draw medium tick marks at 600-cent (tritone) increments with labels
-  for (let t = 0; t <= windowCents; t += 600) {
-    // Skip endpoints (handled by major ticks)
-    if (t === 0 || Math.abs(t - windowCents) < 1) continue;
-    
-    const x = padding + (t / windowCents) * usableWidth;
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", x);
-    tick.setAttribute("y1", lineY - 6);
-    tick.setAttribute("x2", x);
-    tick.setAttribute("y2", lineY + 6);
-    tick.setAttribute("class", "viz-tick");
-    svg.appendChild(tick);
-    
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", x);
-    label.setAttribute("y", lineY + 20);
-    label.setAttribute("text-anchor", "middle");
-    label.setAttribute("class", "viz-label-text");
-    label.textContent = Math.round(t) + "¢";
-    svg.appendChild(label);
-  }
-  
-  // Draw major tick marks and labels at 0 and windowCents
-  const majorTicks = [0, windowCents];
-  majorTicks.forEach(t => {
-    const x = padding + (t / windowCents) * usableWidth;
-    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tick.setAttribute("x1", x);
-    tick.setAttribute("y1", lineY - 8);
-    tick.setAttribute("x2", x);
-    tick.setAttribute("y2", lineY + 8);
-    tick.setAttribute("class", "viz-tick");
-    svg.appendChild(tick);
-    
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", x);
-    label.setAttribute("y", lineY + 22);
-    label.setAttribute("text-anchor", "middle");
-    label.setAttribute("class", "viz-label-text");
-    label.textContent = t === 0 ? "0¢" : Math.round(windowCents) + "¢";
-    svg.appendChild(label);
-  });
-  
-  // Draw points for each ratio (in cents)
-  ratios.forEach((r, i) => {
-    const cents = 1200 * Math.log2(r);
-    if (cents < 0 || cents > windowCents) return; // Outside window
-    const x = padding + (cents / windowCents) * usableWidth;
-    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("cx", x);
-    circle.setAttribute("cy", lineY);
-    circle.setAttribute("r", i === 0 ? 6 : 5);
-    circle.setAttribute("class", i === 0 ? "viz-root" : "viz-point");
-    svg.appendChild(circle);
-  });
-  
-  // Draw target ratios if available
-  if (targetRatios && targetRatios.length > 0) {
-    const isFreeArray = targetRatios.isFree || [];
-    targetRatios.forEach((r, i) => {
-      if (r === null || r === undefined) return; // No target for this interval
+    // Draw target ratios
+    if (targetRatios && targetRatios.length > 0) {
+      const isFreeArray = targetRatios.isFree || [];
+      targetRatios.forEach((r, i) => {
+        if (r === null || r === undefined) return;
+        if (r < 0.999 || r > windowRatio * 1.001) return;
+        const x = padding + ((r - 1) / (windowRatio - 1)) * usableWidth;
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", x);
+        circle.setAttribute("cy", lineY);
+        circle.setAttribute("r", i === 0 ? 8 : 7);
+        let circleClass = i === 0 ? "viz-target-root" : (isFreeArray[i] ? "viz-target-free" : "viz-target");
+        circle.setAttribute("class", circleClass);
+        svg.appendChild(circle);
+      });
+    }
+  },
+
+  drawLog(svgId, ratios, windowCents, targetRatios) {
+    const svg = document.getElementById(svgId);
+    if (!svg) return;
+    const width = svg.clientWidth || 400;
+    const height = 60;
+    svg.innerHTML = "";
+
+    const padding = 20;
+    const lineY = height / 2;
+    const usableWidth = width - 2 * padding;
+
+    // Draw axis line
+    const axis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    axis.setAttribute("x1", padding);
+    axis.setAttribute("y1", lineY);
+    axis.setAttribute("x2", width - padding);
+    axis.setAttribute("y2", lineY);
+    axis.setAttribute("class", "viz-axis");
+    svg.appendChild(axis);
+
+    // Draw tick marks at 100-cent increments
+    for (let t = 0; t <= windowCents; t += 100) {
+      const x = padding + (t / windowCents) * usableWidth;
+      const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      tick.setAttribute("x1", x);
+      tick.setAttribute("y1", lineY - 4);
+      tick.setAttribute("x2", x);
+      tick.setAttribute("y2", lineY + 4);
+      tick.setAttribute("class", "viz-tick");
+      svg.appendChild(tick);
+    }
+
+    // Major ticks at 0 and windowCents
+    [0, windowCents].forEach(t => {
+      const x = padding + (t / windowCents) * usableWidth;
+      const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      tick.setAttribute("x1", x);
+      tick.setAttribute("y1", lineY - 8);
+      tick.setAttribute("x2", x);
+      tick.setAttribute("y2", lineY + 8);
+      tick.setAttribute("class", "viz-tick");
+      svg.appendChild(tick);
+
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", x);
+      label.setAttribute("y", lineY + 22);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("class", "viz-label-text");
+      label.textContent = t === 0 ? "0¢" : Math.round(windowCents) + "¢";
+      svg.appendChild(label);
+    });
+
+    // Draw chord points
+    ratios.forEach((r, i) => {
       const cents = 1200 * Math.log2(r);
-      // Allow small tolerance for numerical precision
-      if (cents < -1 || cents > windowCents + 1) return; // Outside window
+      if (cents < 0 || cents > windowCents) return;
       const x = padding + (cents / windowCents) * usableWidth;
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("cx", x);
       circle.setAttribute("cy", lineY);
-      circle.setAttribute("r", i === 0 ? 8 : 7);
-
-      // Choose class based on whether this is a free note
-      let circleClass;
-      if (i === 0) {
-        circleClass = "viz-target-root";
-      } else if (isFreeArray[i]) {
-        circleClass = "viz-target-free";
-      } else {
-        circleClass = "viz-target";
-      }
-      circle.setAttribute("class", circleClass);
+      circle.setAttribute("r", i === 0 ? 6 : 5);
+      circle.setAttribute("class", i === 0 ? "viz-root" : "viz-point");
       svg.appendChild(circle);
     });
+
+    // Draw target ratios
+    if (targetRatios && targetRatios.length > 0) {
+      const isFreeArray = targetRatios.isFree || [];
+      targetRatios.forEach((r, i) => {
+        if (r === null || r === undefined) return;
+        const cents = 1200 * Math.log2(r);
+        if (cents < -1 || cents > windowCents + 1) return;
+        const x = padding + (cents / windowCents) * usableWidth;
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", x);
+        circle.setAttribute("cy", lineY);
+        circle.setAttribute("r", i === 0 ? 8 : 7);
+        let circleClass = i === 0 ? "viz-target-root" : (isFreeArray[i] ? "viz-target-free" : "viz-target");
+        circle.setAttribute("class", circleClass);
+        svg.appendChild(circle);
+      });
+    }
   }
-}
-
-// Update visualization on window change
-document.getElementById("btn-update-viz").addEventListener("click", updateVisualization);
-
-// Track which input was last edited and sync them
-document.getElementById("viz-window").addEventListener("input", () => {
-  vizWindowSource = "ratio";
-  syncVizWindowFromRatio();
-});
-document.getElementById("viz-window-cents").addEventListener("input", () => {
-  vizWindowSource = "cents";
-  syncVizWindowFromCents();
-});
-
-// Update visualization whenever chord changes
-const originalRefreshChordIfPlaying = refreshChordIfPlaying;
-refreshChordIfPlaying = function() {
-  originalRefreshChordIfPlaying();
-  updateVisualization();
 };
 
-// Initial visualization
-updateFromCents(1); // This already triggers refreshChordIfPlaying
-updateVisualization();
+// ============ Tab Controller ============
+
+const TabController = {
+  init() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => this.switchTab(btn.dataset.tab));
+    });
+  },
+
+  switchTab(tabId) {
+    Audio.stop();
+    AppState.activeTab = tabId;
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tabId);
+    });
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+      panel.classList.toggle('active', panel.id === `tab-${tabId}`);
+    });
+
+    // Update visualization for the new tab
+    Visualization.update(tabId);
+  }
+};
+
+// ============ Build Tab Module ============
+
+const BuildTab = {
+  intervalCount: 1,
+  prefix: 'build',
+
+  getBaseFrequency() {
+    const freq = parseFloat(document.getElementById(`${this.prefix}-base-frequency`).value);
+    if (isNaN(freq) || freq <= 0) {
+      return AppState.DEFAULT_PITCH_STANDARD;
+    }
+    return freq;
+  },
+
+  getChordFrequencies() {
+    const baseFreq = this.getBaseFrequency();
+    const frequencies = [baseFreq];
+
+    for (let i = 1; i <= this.intervalCount; i++) {
+      const centsInput = document.getElementById(`${this.prefix}-interval-${i}-cents`);
+      if (centsInput) {
+        const cents = Utils.parseCents(centsInput.value);
+        if (!isNaN(cents)) {
+          frequencies.push(baseFreq * Math.pow(2, cents / 1200));
+        }
+      }
+    }
+    return frequencies;
+  },
+
+  getFrequencyForInterval(intervalIndex) {
+    const baseFreq = this.getBaseFrequency();
+    const centsInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-cents`);
+    if (centsInput) {
+      const cents = Utils.parseCents(centsInput.value);
+      if (!isNaN(cents)) {
+        return baseFreq * Math.pow(2, cents / 1200);
+      }
+    }
+    return baseFreq;
+  },
+
+  getPreviousFrequency(intervalIndex) {
+    if (intervalIndex <= 1) {
+      return this.getBaseFrequency();
+    }
+    return this.getFrequencyForInterval(intervalIndex - 1);
+  },
+
+  updateFromCents(intervalIndex) {
+    const centsInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-cents`);
+    const ratioInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-ratio`);
+
+    const cents = Utils.parseCents(centsInput.value);
+    if (isNaN(cents) || cents <= 0) {
+      alert("Cents must be a positive number.");
+      return;
+    }
+
+    centsInput.value = cents.toFixed(3);
+    const ratio = Utils.centsToRatio(cents);
+    ratioInput.value = ratio.toFixed(6);
+
+    this.recalculateIntervalsOtherThan(intervalIndex);
+    this.refreshIfPlaying();
+  },
+
+  recalculateIntervalsOtherThan(intervalIndex) {
+    const baseFreq = this.getBaseFrequency();
+    const changedCentsInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-cents`);
+    const changedCents = Utils.parseCents(changedCentsInput.value);
+    if (isNaN(changedCents)) return;
+
+    const changedFreq = baseFreq * Utils.centsToRatio(changedCents);
+
+    let sumRelativeDeltas = 0;
+    for (let i = 1; i <= intervalIndex; i++) {
+      const deltaInput = document.getElementById(`${this.prefix}-interval-${i}-delta`);
+      if (!deltaInput) continue;
+      const relativeDelta = parseFloat(deltaInput.value);
+      if (isNaN(relativeDelta)) continue;
+      sumRelativeDeltas += relativeDelta;
+    }
+
+    if (sumRelativeDeltas <= 0) return;
+    const firstDelta = (changedFreq - baseFreq) / sumRelativeDeltas;
+    if (firstDelta <= 0) return;
+
+    for (let i = 1; i <= this.intervalCount; i++) {
+      const deltaInput = document.getElementById(`${this.prefix}-interval-${i}-delta`);
+      const centsInput = document.getElementById(`${this.prefix}-interval-${i}-cents`);
+      const ratioInput = document.getElementById(`${this.prefix}-interval-${i}-ratio`);
+
+      if (!deltaInput || !centsInput || !ratioInput) continue;
+
+      const relativeDelta = parseFloat(deltaInput.value);
+      if (isNaN(relativeDelta)) continue;
+
+      const absoluteDelta = relativeDelta * firstDelta;
+      const prevFreq = this.getPreviousFrequency(i);
+      const newFreq = prevFreq + absoluteDelta;
+
+      const newCents = 1200 * Math.log2(newFreq / baseFreq);
+      centsInput.value = newCents.toFixed(3);
+      ratioInput.value = (newFreq / baseFreq).toFixed(6);
+    }
+  },
+
+  updateFromDelta(intervalIndex) {
+    const deltaInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-delta`);
+    const deltaValue = parseFloat(deltaInput.value);
+    if (isNaN(deltaValue) || deltaValue <= 0) {
+      alert("Delta must be a positive number.");
+      return;
+    }
+
+    const baseFreq = this.getBaseFrequency();
+    let unitDelta;
+
+    if (this.intervalCount >= 2 && intervalIndex === 1) {
+      const secondCentsInput = document.getElementById(`${this.prefix}-interval-2-cents`);
+      const secondDeltaInput = document.getElementById(`${this.prefix}-interval-2-delta`);
+      const firstCentsInput = document.getElementById(`${this.prefix}-interval-1-cents`);
+
+      const secondCents = Utils.parseCents(secondCentsInput.value);
+      const secondRelativeDelta = parseFloat(secondDeltaInput.value);
+      const firstCents = Utils.parseCents(firstCentsInput.value);
+
+      if (isNaN(secondCents) || isNaN(secondRelativeDelta) || isNaN(firstCents) || secondRelativeDelta <= 0) return;
+
+      const firstFreq = baseFreq * Utils.centsToRatio(firstCents);
+      const secondFreq = baseFreq * Utils.centsToRatio(secondCents);
+      const secondAbsoluteDelta = secondFreq - firstFreq;
+      unitDelta = secondAbsoluteDelta / secondRelativeDelta;
+    } else if (intervalIndex === 1) {
+      const firstCentsInput = document.getElementById(`${this.prefix}-interval-1-cents`);
+      const firstCents = Utils.parseCents(firstCentsInput.value);
+      if (isNaN(firstCents)) return;
+
+      const firstFreq = baseFreq * Utils.centsToRatio(firstCents);
+      const firstAbsoluteDelta = firstFreq - baseFreq;
+      unitDelta = firstAbsoluteDelta;
+    } else {
+      const firstCentsInput = document.getElementById(`${this.prefix}-interval-1-cents`);
+      const firstDeltaInput = document.getElementById(`${this.prefix}-interval-1-delta`);
+      const firstCents = Utils.parseCents(firstCentsInput.value);
+      const firstRelativeDelta = parseFloat(firstDeltaInput.value) || 1;
+
+      if (isNaN(firstCents)) return;
+
+      const firstFreq = baseFreq * Utils.centsToRatio(firstCents);
+      const firstAbsoluteDelta = firstFreq - baseFreq;
+      unitDelta = firstAbsoluteDelta / firstRelativeDelta;
+    }
+
+    if (unitDelta <= 0) return;
+
+    for (let i = intervalIndex; i <= this.intervalCount; i++) {
+      const iDeltaInput = document.getElementById(`${this.prefix}-interval-${i}-delta`);
+      const iCentsInput = document.getElementById(`${this.prefix}-interval-${i}-cents`);
+      const iRatioInput = document.getElementById(`${this.prefix}-interval-${i}-ratio`);
+
+      if (!iDeltaInput || !iCentsInput || !iRatioInput) continue;
+
+      const iRelativeDelta = parseFloat(iDeltaInput.value);
+      if (isNaN(iRelativeDelta)) continue;
+
+      const iAbsoluteDelta = iRelativeDelta * unitDelta;
+      const iPrevFreq = this.getPreviousFrequency(i);
+      const iNewFreq = iPrevFreq + iAbsoluteDelta;
+
+      const iNewCents = 1200 * Math.log2(iNewFreq / baseFreq);
+      iCentsInput.value = iNewCents.toFixed(3);
+      iRatioInput.value = (iNewFreq / baseFreq).toFixed(6);
+    }
+
+    this.refreshIfPlaying();
+  },
+
+  updateAllDeltas() {
+    const baseFreq = this.getBaseFrequency();
+    const firstCentsInput = document.getElementById(`${this.prefix}-interval-1-cents`);
+    const firstCents = Utils.parseCents(firstCentsInput.value);
+    if (isNaN(firstCents)) return;
+
+    const firstFreq = baseFreq * Utils.centsToRatio(firstCents);
+    const firstDelta = firstFreq - baseFreq;
+    if (firstDelta <= 0) return;
+
+    const firstDeltaInput = document.getElementById(`${this.prefix}-interval-1-delta`);
+    if (firstDeltaInput) {
+      firstDeltaInput.value = "1";
+    }
+
+    for (let i = 2; i <= this.intervalCount; i++) {
+      this.updateDeltaDisplay(i, firstDelta);
+    }
+  },
+
+  updateDeltaDisplay(intervalIndex, firstDelta) {
+    const baseFreq = this.getBaseFrequency();
+    const centsInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-cents`);
+    const deltaInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-delta`);
+
+    if (!centsInput || !deltaInput) return;
+
+    const cents = Utils.parseCents(centsInput.value);
+    if (isNaN(cents)) return;
+
+    const currentFreq = baseFreq * Utils.centsToRatio(cents);
+    const prevFreq = this.getPreviousFrequency(intervalIndex);
+    const absoluteDelta = currentFreq - prevFreq;
+
+    const relativeDelta = absoluteDelta / firstDelta;
+    deltaInput.value = relativeDelta.toFixed(6);
+  },
+
+  recalcFromCents() {
+    for (let i = 1; i <= this.intervalCount; i++) {
+      const centsInput = document.getElementById(`${this.prefix}-interval-${i}-cents`);
+      if (!centsInput) continue;
+
+      const cents = Utils.parseCents(centsInput.value);
+      if (isNaN(cents) || cents <= 0) {
+        alert(`Interval ${i}: Cents must be a positive number.`);
+        return;
+      }
+    }
+
+    for (let i = 1; i <= this.intervalCount; i++) {
+      const centsInput = document.getElementById(`${this.prefix}-interval-${i}-cents`);
+      const ratioInput = document.getElementById(`${this.prefix}-interval-${i}-ratio`);
+
+      if (!centsInput || !ratioInput) continue;
+
+      const cents = Utils.parseCents(centsInput.value);
+      if (isNaN(cents)) continue;
+
+      centsInput.value = cents.toFixed(3);
+      const ratio = Utils.centsToRatio(cents);
+      ratioInput.value = ratio.toFixed(6);
+    }
+
+    this.updateAllDeltas();
+    this.refreshIfPlaying();
+  },
+
+  updateAllFromDeltas() {
+    const baseFreq = this.getBaseFrequency();
+    const lastCentsInput = document.getElementById(`${this.prefix}-interval-${this.intervalCount}-cents`);
+    const lastCents = Utils.parseCents(lastCentsInput.value);
+    if (isNaN(lastCents)) return;
+
+    const lastFreq = baseFreq * Utils.centsToRatio(lastCents);
+
+    let sumRelativeDeltas = 0;
+    for (let i = 1; i <= this.intervalCount; i++) {
+      const deltaInput = document.getElementById(`${this.prefix}-interval-${i}-delta`);
+      if (!deltaInput) continue;
+      const relativeDelta = parseFloat(deltaInput.value);
+      if (isNaN(relativeDelta)) continue;
+      sumRelativeDeltas += relativeDelta;
+    }
+
+    if (sumRelativeDeltas <= 0) return;
+    const refDelta = (lastFreq - baseFreq) / sumRelativeDeltas;
+    if (refDelta <= 0) return;
+
+    for (let i = 1; i <= this.intervalCount; i++) {
+      const deltaInput = document.getElementById(`${this.prefix}-interval-${i}-delta`);
+      const centsInput = document.getElementById(`${this.prefix}-interval-${i}-cents`);
+      const ratioInput = document.getElementById(`${this.prefix}-interval-${i}-ratio`);
+
+      if (!deltaInput || !centsInput || !ratioInput) continue;
+
+      const relativeDelta = parseFloat(deltaInput.value);
+      if (isNaN(relativeDelta)) continue;
+
+      const absoluteDelta = relativeDelta * refDelta;
+      const prevFreq = this.getPreviousFrequency(i);
+      const newFreq = prevFreq + absoluteDelta;
+
+      const newCents = 1200 * Math.log2(newFreq / baseFreq);
+      centsInput.value = newCents.toFixed(3);
+      ratioInput.value = (newFreq / baseFreq).toFixed(6);
+    }
+
+    this.refreshIfPlaying();
+  },
+
+  play() {
+    const frequencies = this.getChordFrequencies();
+    Audio.playFrequencies(frequencies);
+  },
+
+  refreshIfPlaying() {
+    if (AppState.isPlaying && AppState.activeTab === this.prefix) {
+      this.play();
+    }
+    Visualization.update(this.prefix);
+  },
+
+  addInterval() {
+    this.intervalCount++;
+    const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+    const newRow = document.createElement("tr");
+    newRow.innerHTML = `
+      <td>
+        <input type="text" id="${this.prefix}-interval-${this.intervalCount}-cents" style="width: 80px" />
+        Interval (cents or a\\n, from root)
+        <br/>
+        <input type="text" id="${this.prefix}-interval-${this.intervalCount}-ratio" style="width: 80px" />
+        Ratio (from root)
+        <br/>
+        <button id="${this.prefix}-btn-update-interval-${this.intervalCount}">Update (keep deltas)</button>
+        <br/>
+      </td>
+      <td>
+        <input type="number" id="${this.prefix}-interval-${this.intervalCount}-delta" value="1" style="width: 80px" />
+        Delta
+        <button id="${this.prefix}-btn-update-delta-${this.intervalCount}">Update (keep other deltas)</button>
+        <br/>
+      </td>
+    `;
+    intervalTable.appendChild(newRow);
+    this.attachIntervalListeners(this.intervalCount);
+    this.updateFromDelta(this.intervalCount);
+  },
+
+  removeInterval() {
+    if (this.intervalCount > 1) {
+      const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+      intervalTable.removeChild(intervalTable.lastElementChild);
+      this.intervalCount--;
+      this.refreshIfPlaying();
+    }
+  },
+
+  clearIntervals() {
+    while (this.intervalCount > 1) {
+      const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+      intervalTable.removeChild(intervalTable.lastElementChild);
+      this.intervalCount--;
+    }
+    this.refreshIfPlaying();
+  },
+
+  attachIntervalListeners(intervalIndex) {
+    const intervalBtn = document.getElementById(`${this.prefix}-btn-update-interval-${intervalIndex}`);
+    const deltaBtn = document.getElementById(`${this.prefix}-btn-update-delta-${intervalIndex}`);
+    const centsInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-cents`);
+    const ratioInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-ratio`);
+
+    if (intervalBtn) {
+      intervalBtn.addEventListener("click", () => this.updateFromCents(intervalIndex));
+    }
+    if (deltaBtn) {
+      deltaBtn.addEventListener("click", () => this.updateFromDelta(intervalIndex));
+    }
+
+    if (centsInput) {
+      centsInput.addEventListener("input", () => {
+        const cents = Utils.parseCents(centsInput.value);
+        if (!isNaN(cents) && cents > 0) {
+          const ratio = Utils.centsToRatio(cents);
+          ratioInput.value = ratio.toFixed(6);
+        }
+      });
+    }
+    if (ratioInput) {
+      ratioInput.addEventListener("input", () => {
+        const cents = Utils.ratioToCents(ratioInput.value);
+        if (!isNaN(cents) && cents > 0) {
+          centsInput.value = cents.toFixed(3);
+        }
+      });
+    }
+  },
+
+  init() {
+    // Attach listeners for first interval
+    this.attachIntervalListeners(1);
+
+    // Audio controls
+    document.getElementById(`${this.prefix}-btn-play`).addEventListener("click", () => this.play());
+    document.getElementById(`${this.prefix}-btn-stop`).addEventListener("click", () => Audio.stop());
+    document.getElementById(`${this.prefix}-waveform`).addEventListener("change", (e) => {
+      Audio.setWaveform(e.target.value, this.prefix);
+      if (AppState.isPlaying && AppState.activeTab === this.prefix) {
+        this.play();
+      }
+    });
+
+    // Interval management
+    document.getElementById(`${this.prefix}-btn-add`).addEventListener("click", () => this.addInterval());
+    document.getElementById(`${this.prefix}-btn-remove`).addEventListener("click", () => this.removeInterval());
+    document.getElementById(`${this.prefix}-btn-clear`).addEventListener("click", () => this.clearIntervals());
+
+    // Global update buttons
+    document.getElementById(`${this.prefix}-btn-recalc-deltas`).addEventListener("click", () => this.recalcFromCents());
+    document.getElementById(`${this.prefix}-btn-update-from-deltas`).addEventListener("click", () => this.updateAllFromDeltas());
+
+    // Base frequency
+    document.getElementById(`${this.prefix}-base-frequency`).addEventListener("input", () => this.refreshIfPlaying());
+
+    // Visualization controls
+    document.getElementById(`${this.prefix}-btn-update-viz`).addEventListener("click", () => Visualization.update(this.prefix));
+    document.getElementById(`${this.prefix}-viz-window`).addEventListener("input", () => {
+      Visualization.vizWindowSource[this.prefix] = "ratio";
+      Visualization.syncWindowFromRatio(this.prefix);
+    });
+    document.getElementById(`${this.prefix}-viz-window-cents`).addEventListener("input", () => {
+      Visualization.vizWindowSource[this.prefix] = "cents";
+      Visualization.syncWindowFromCents(this.prefix);
+    });
+
+    // Initialize first interval
+    this.updateFromCents(1);
+    Visualization.update(this.prefix);
+  }
+};
+
+// ============ Measure Tab Module ============
+
+const MeasureTab = {
+  intervalCount: 1,
+  prefix: 'measure',
+
+  getBaseFrequency() {
+    const freq = parseFloat(document.getElementById(`${this.prefix}-base-frequency`).value);
+    if (isNaN(freq) || freq <= 0) {
+      return AppState.DEFAULT_PITCH_STANDARD;
+    }
+    return freq;
+  },
+
+  getChordFrequencies() {
+    const baseFreq = this.getBaseFrequency();
+    const frequencies = [baseFreq];
+
+    for (let i = 1; i <= this.intervalCount; i++) {
+      const centsInput = document.getElementById(`${this.prefix}-interval-${i}-cents`);
+      if (centsInput) {
+        const cents = Utils.parseCents(centsInput.value);
+        if (!isNaN(cents)) {
+          frequencies.push(baseFreq * Math.pow(2, cents / 1200));
+        }
+      }
+    }
+    return frequencies;
+  },
+
+  getTargetChordFrequencies() {
+    const baseFreq = this.getBaseFrequency();
+    const targetRatios = Visualization.targetRatios[this.prefix];
+    if (!targetRatios || targetRatios.length === 0) {
+      return this.getChordFrequencies(); // Fall back to actual chord
+    }
+    return targetRatios.filter(r => r !== null).map(r => baseFreq * r);
+  },
+
+  play() {
+    const frequencies = this.getChordFrequencies();
+    Audio.playFrequencies(frequencies);
+  },
+
+  playTarget() {
+    const frequencies = this.getTargetChordFrequencies();
+    Audio.playFrequencies(frequencies);
+  },
+
+  refreshIfPlaying() {
+    if (AppState.isPlaying && AppState.activeTab === this.prefix) {
+      this.play();
+    }
+    Visualization.update(this.prefix);
+  },
+
+  addInterval() {
+    this.intervalCount++;
+    const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+    const newRow = document.createElement("tr");
+    newRow.innerHTML = `
+      <td>
+        <strong>#${this.intervalCount}</strong>
+        <input type="text" id="${this.prefix}-interval-${this.intervalCount}-cents" style="width: 80px" value="701.955" />
+        Cents<br/<br/>
+        <input type="text" id="${this.prefix}-interval-${this.intervalCount}-ratio" style="width: 80px" value="1.5" />
+        Ratio
+      </td>
+      <td>
+        Target delta<input type="number" id="${this.prefix}-interval-${this.intervalCount}-target-delta" value="1" style="width: 60px" />
+        <br/>
+        Free<input type="checkbox" id="${this.prefix}-interval-${this.intervalCount}-free" />
+        
+      </td>
+    `;
+    intervalTable.appendChild(newRow);
+    this.attachIntervalListeners(this.intervalCount);
+    Visualization.update(this.prefix);
+  },
+
+  removeInterval() {
+    if (this.intervalCount > 1) {
+      const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+      intervalTable.removeChild(intervalTable.lastElementChild);
+      this.intervalCount--;
+      Visualization.update(this.prefix);
+    }
+  },
+
+  copyFromBuild() {
+    // Clear existing intervals except first
+    while (this.intervalCount > 1) {
+      const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+      intervalTable.removeChild(intervalTable.lastElementChild);
+      this.intervalCount--;
+    }
+
+    // Copy base frequency
+    const buildBaseFreq = document.getElementById('build-base-frequency').value;
+    document.getElementById(`${this.prefix}-base-frequency`).value = buildBaseFreq;
+
+    // Copy first interval
+    const buildCents1 = document.getElementById('build-interval-1-cents').value;
+    const buildRatio1 = document.getElementById('build-interval-1-ratio').value;
+    document.getElementById(`${this.prefix}-interval-1-cents`).value = buildCents1;
+    document.getElementById(`${this.prefix}-interval-1-ratio`).value = buildRatio1;
+
+    // Copy additional intervals
+    for (let i = 2; i <= BuildTab.intervalCount; i++) {
+      this.addInterval();
+      const buildCents = document.getElementById(`build-interval-${i}-cents`).value;
+      const buildRatio = document.getElementById(`build-interval-${i}-ratio`).value;
+      document.getElementById(`${this.prefix}-interval-${i}-cents`).value = buildCents;
+      document.getElementById(`${this.prefix}-interval-${i}-ratio`).value = buildRatio;
+    }
+
+    Visualization.update(this.prefix);
+  },
+
+  attachIntervalListeners(intervalIndex) {
+    const centsInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-cents`);
+    const ratioInput = document.getElementById(`${this.prefix}-interval-${intervalIndex}-ratio`);
+
+    if (centsInput) {
+      centsInput.addEventListener("input", () => {
+        const cents = Utils.parseCents(centsInput.value);
+        if (!isNaN(cents) && cents > 0) {
+          const ratio = Utils.centsToRatio(cents);
+          ratioInput.value = ratio.toFixed(6);
+          Visualization.update(this.prefix);
+        }
+      });
+    }
+    if (ratioInput) {
+      ratioInput.addEventListener("input", () => {
+        const cents = Utils.ratioToCents(ratioInput.value);
+        if (!isNaN(cents) && cents > 0) {
+          centsInput.value = cents.toFixed(3);
+          Visualization.update(this.prefix);
+        }
+      });
+    }
+  },
+
+  calculateError() {
+    const domain = document.getElementById(`${this.prefix}-error-domain`).value;
+    const model = document.getElementById(`${this.prefix}-error-model`).value;
+
+    // Extract chord data
+    const ratios = [];
+    const targetDeltas = [];
+    const isFree = [];
+
+    for (let i = 1; i <= this.intervalCount; i++) {
+      const centsInput = document.getElementById(`${this.prefix}-interval-${i}-cents`);
+      const targetDeltaInput = document.getElementById(`${this.prefix}-interval-${i}-target-delta`);
+      const freeCheckbox = document.getElementById(`${this.prefix}-interval-${i}-free`);
+
+      if (!centsInput || !targetDeltaInput) continue;
+
+      const cents = Utils.parseCents(centsInput.value);
+      const targetDelta = parseFloat(targetDeltaInput.value);
+      const checkboxFree = freeCheckbox ? freeCheckbox.checked : false;
+
+      if (isNaN(cents)) continue;
+
+      const free = checkboxFree || isNaN(targetDelta);
+      const ratio = Utils.centsToRatio(cents);
+      ratios.push(ratio);
+      targetDeltas.push(isNaN(targetDelta) ? 1 : targetDelta);
+      isFree.push(free);
+    }
+
+    if (ratios.length === 0) {
+      document.getElementById(`${this.prefix}-error-result`).textContent = "—";
+      return;
+    }
+
+    // Check if any deltas are free
+    const hasFreeDeltas = isFree.some(f => f);
+
+    let result;
+    let targetRatiosArray;
+    let deltaSignature;
+
+    if (hasFreeDeltas) {
+      result = calculatePDRError(ratios, targetDeltas, isFree, domain, model);
+      if (!result) {
+        document.getElementById(`${this.prefix}-error-result`).textContent = "undefined";
+        return;
+      }
+
+      // Build target ratios from PDR result (simplified)
+      targetRatiosArray = [1];
+      let cumDelta = 0;
+      for (let i = 0; i < targetDeltas.length; i++) {
+        cumDelta += targetDeltas[i];
+        targetRatiosArray.push(1 + cumDelta / result.x);
+      }
+      targetRatiosArray.isFree = [false, ...isFree];
+
+      deltaSignature = "+" + targetDeltas.map((d, i) => isFree[i] ? "?" : d).join("+");
+    } else {
+      result = calculateFDRError(ratios, targetDeltas, domain, model);
+
+      // Build target ratios from FDR result
+      targetRatiosArray = [1];
+      let cumDelta = 0;
+      for (let i = 0; i < targetDeltas.length; i++) {
+        cumDelta += targetDeltas[i];
+        targetRatiosArray.push(1 + cumDelta / result.x);
+      }
+      targetRatiosArray.isFree = Array(targetRatiosArray.length).fill(false);
+
+      deltaSignature = "+" + targetDeltas.join("+");
+    }
+
+    // Store target ratios for visualization
+    Visualization.targetRatios[this.prefix] = targetRatiosArray;
+
+    // Build display
+    const ratioStr = targetRatiosArray.slice(1).map(r => r.toFixed(6)).join(" : ");
+    const errorStr = result.error.toFixed(domain === "log" ? 3 : 6) + (domain === "log" ? " ¢" : "");
+
+    document.getElementById(`${this.prefix}-error-result`).innerHTML =
+      `<table><tr><th>error</th><td>${errorStr}</td></tr>` +
+      `<tr><th>x</th><td>${result.x.toFixed(4)}</td></tr>` +
+      `<tr><th>target chord</th><td>1 : ${ratioStr}</td></tr>` +
+      `<tr><th>target deltas</th><td>${deltaSignature}</td></tr></table>`;
+
+    Visualization.update(this.prefix);
+  },
+
+  clearTarget() {
+    Visualization.targetRatios[this.prefix] = null;
+    document.getElementById(`${this.prefix}-error-result`).textContent = "";
+    Visualization.update(this.prefix);
+  },
+
+  init() {
+    // Attach listeners for first interval
+    this.attachIntervalListeners(1);
+
+    // Audio controls
+    document.getElementById(`${this.prefix}-btn-play`).addEventListener("click", () => this.play());
+    document.getElementById(`${this.prefix}-btn-play-target`).addEventListener("click", () => this.playTarget());
+    document.getElementById(`${this.prefix}-btn-stop`).addEventListener("click", () => Audio.stop());
+    document.getElementById(`${this.prefix}-waveform`).addEventListener("change", (e) => {
+      Audio.setWaveform(e.target.value, this.prefix);
+      if (AppState.isPlaying && AppState.activeTab === this.prefix) {
+        this.play();
+      }
+    });
+
+    // Interval management
+    document.getElementById(`${this.prefix}-btn-add`).addEventListener("click", () => this.addInterval());
+    document.getElementById(`${this.prefix}-btn-remove`).addEventListener("click", () => this.removeInterval());
+    document.getElementById(`${this.prefix}-btn-copy-from-build`).addEventListener("click", () => this.copyFromBuild());
+
+    // Error calculation
+    document.getElementById(`${this.prefix}-btn-calculate`).addEventListener("click", () => this.calculateError());
+    document.getElementById(`${this.prefix}-btn-clear-target`).addEventListener("click", () => this.clearTarget());
+
+    // Base frequency
+    document.getElementById(`${this.prefix}-base-frequency`).addEventListener("input", () => Visualization.update(this.prefix));
+
+    // Visualization controls
+    document.getElementById(`${this.prefix}-btn-update-viz`).addEventListener("click", () => Visualization.update(this.prefix));
+    document.getElementById(`${this.prefix}-viz-window`).addEventListener("input", () => {
+      Visualization.vizWindowSource[this.prefix] = "ratio";
+      Visualization.syncWindowFromRatio(this.prefix);
+    });
+    document.getElementById(`${this.prefix}-viz-window-cents`).addEventListener("input", () => {
+      Visualization.vizWindowSource[this.prefix] = "cents";
+      Visualization.syncWindowFromCents(this.prefix);
+    });
+
+    // Initialize visualization
+    Visualization.update(this.prefix);
+  }
+};
 
 // ============ Mobile Drag Handle ============
 
-(function setupMobileDragHandle() {
-  const dragHandle = document.querySelector('.mobile-drag-handle');
-  const vizColumn = document.querySelector('.visualization-column');
+function setupMobileDragHandle() {
+  document.querySelectorAll('.mobile-drag-handle').forEach(dragHandle => {
+    const vizColumn = dragHandle.closest('.visualization-column');
+    if (!vizColumn) return;
 
-  if (!dragHandle || !vizColumn) return;
+    let isDragging = false;
+    let startY = 0;
+    let startHeight = 0;
 
-  let isDragging = false;
-  let startY = 0;
-  let startHeight = 0;
+    function handleTouchStart(e) {
+      if (window.innerWidth > 600) return;
+      isDragging = true;
+      startY = e.touches[0].clientY;
 
-  function handleTouchStart(e) {
-    // Only handle on mobile (check if drag handle is visible)
-    if (window.innerWidth > 600) return;
-
-    isDragging = true;
-    startY = e.touches[0].clientY;
-
-    // Get current height as percentage of viewport
-    const currentMaxHeight = window.getComputedStyle(vizColumn).maxHeight;
-    const match = currentMaxHeight.match(/(\d+(?:\.\d+)?)(vh|px)/);
-    if (match) {
-      if (match[2] === 'vh') {
-        startHeight = parseFloat(match[1]);
-      } else if (match[2] === 'px') {
-        startHeight = (parseFloat(match[1]) / window.innerHeight) * 100;
+      const currentMaxHeight = window.getComputedStyle(vizColumn).maxHeight;
+      const match = currentMaxHeight.match(/(\d+(?:\.\d+)?)(vh|px)/);
+      if (match) {
+        if (match[2] === 'vh') {
+          startHeight = parseFloat(match[1]);
+        } else if (match[2] === 'px') {
+          startHeight = (parseFloat(match[1]) / window.innerHeight) * 100;
+        }
+      } else {
+        startHeight = 50;
       }
-    } else {
-      startHeight = 50; // default to 50vh
+      e.preventDefault();
     }
 
-    e.preventDefault();
-  }
+    function handleTouchMove(e) {
+      if (!isDragging) return;
+      const currentY = e.touches[0].clientY;
+      const deltaY = startY - currentY;
+      const deltaVh = (deltaY / window.innerHeight) * 100;
+      let newHeight = startHeight + deltaVh;
+      newHeight = Math.max(20, Math.min(80, newHeight));
+      vizColumn.style.maxHeight = `${newHeight}vh`;
+      e.preventDefault();
+    }
 
-  function handleTouchMove(e) {
-    if (!isDragging) return;
+    function handleTouchEnd() {
+      isDragging = false;
+    }
 
-    const currentY = e.touches[0].clientY;
-    const deltaY = startY - currentY; // Positive when dragging up
-    const deltaVh = (deltaY / window.innerHeight) * 100;
+    dragHandle.addEventListener('touchstart', handleTouchStart, { passive: false });
+    dragHandle.addEventListener('touchmove', handleTouchMove, { passive: false });
+    dragHandle.addEventListener('touchend', handleTouchEnd);
+    dragHandle.addEventListener('touchcancel', handleTouchEnd);
+  });
+}
 
-    let newHeight = startHeight + deltaVh;
+// ============ Initialization ============
 
-    // Clamp between 20vh and 80vh
-    newHeight = Math.max(20, Math.min(80, newHeight));
-
-    vizColumn.style.maxHeight = `${newHeight}vh`;
-
-    e.preventDefault();
-  }
-
-  function handleTouchEnd() {
-    isDragging = false;
-  }
-
-  dragHandle.addEventListener('touchstart', handleTouchStart, { passive: false });
-  dragHandle.addEventListener('touchmove', handleTouchMove, { passive: false });
-  dragHandle.addEventListener('touchend', handleTouchEnd);
-  dragHandle.addEventListener('touchcancel', handleTouchEnd);
-})();
+document.addEventListener('DOMContentLoaded', () => {
+  TabController.init();
+  BuildTab.init();
+  MeasureTab.init();
+  setupMobileDragHandle();
+});

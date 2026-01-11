@@ -18,150 +18,262 @@
       <a href="https://github.com/turbofishcrow/delta" target="_blank"
         >GitHub</a
       >.
-      <table>
-        <tr>
-          <td>
-            <hr/>
-            <label for="input-base-frequency"
-              ><strong>Base frequency</strong> (in Hz, default 220)</label
-            >
-            <input
-              type="number"
-              id="input-base-frequency"
-              name="input-base-frequency"
-              value="220"
-              style="width: 80px"
-            />
-            <hr />
-            <div id="audio-controls">
-              <strong>Playback</strong>
-              <button id="btn-play-chord">▶ Play</button>
-              <button id="btn-stop-chord">⏹ Stop</button>
-              &nbsp;&nbsp;
-              <label for="waveform-select"><strong>Waveform:</strong></label>
-              <select id="waveform-select">
-                <option value="sine">Sine</option>
-                <option value="triangle">Triangle</option>
-                <option value="semisine">Semisine</option>
-                <option value="square">Square</option>
-                <option value="sawtooth">Saw</option>
-              </select>
-            </div>
-            <hr />
-            <strong>Add/Remove intervals</strong>
-            <br/>
-            <button id="btn-add-interval">Append +1</button>
-            <button id="btn-remove-interval">Remove last</button>
-            <button id="btn-clear-intervals">Keep first only</button>
-            <hr />
-            <strong>Global update</strong>
-            <br/>
-            <button id="btn-recalc-deltas">Update from all intervals (recalc deltas)</button>
-            <button id="btn-update-from-deltas">Update from all deltas (keep outer interval)</button>
-            <hr />
-            <strong>Intervals</strong>
-            <table id="intervals">
-              <tr>
-                <td>
-                  <input
-                    type="text"
-                    id="input-interval-1-cents"
-                    name="input-interval-1-cents"
-                    value="400.0"
-                    style="width: 80px"
-                  />
-                  Interval (cents or a\n, from root)
-                  <br/>
-                  <input
-                    type="text"
-                    id="input-interval-1-ratio"
-                    name="input-interval-1-ratio"
-                    style="width: 80px"
-                  />
-                  Ratio (from root)
-                  <br/>
-                  <button id="btn-update-interval-1">Update (keep deltas)</button>
-                  <br/>
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    id="input-interval-1-delta"
-                    name="input-interval-1-delta"
-                    value="1"
-                    style="width: 80px"
-                  />
-                  Delta
-                  <button id="btn-update-delta-1">Update (keep other deltas)</button>
-                  <input
-                    type="number"
-                    id="input-interval-1-target-delta"
-                    name="input-interval-1-target-delta"
-                    value="1"
-                    style="width: 80px"
-                  />
-                  Target delta
-                  <br/>
-                  <input
-                    type="checkbox"
-                    id="input-interval-1-free"
-                    name="input-interval-1-free"
-                  />
-                  Free (+?)
-                </td>
-              </tr>
-            </table>
-          </td>
-          <td class="visualization-column">
-            <div class="mobile-drag-handle">
-              <div class="drag-handle-bar"></div>
-            </div>
-            <hr/>
-            <div id="visualization">
-              <strong>Chord Visualization</strong>
-              <div id="viz-controls">
-                <strong>Window size:</strong>
-                <label for="viz-window">Ratio</label>
-                <input type="text" id="viz-window" value="2/1" style="width: 60px" />
-                <label for="viz-window-cents" style="margin-left: 10px;">Cents</label>
-                <input type="text" id="viz-window-cents" value="1200" style="width: 60px" />
-                <button id="btn-update-viz">Update</button>
-              </div>
-              <div id="viz-container">
-                <div class="viz-panel">
-                  <div class="viz-label">Linear (frequency space)</div>
-                  <svg id="viz-linear" width="100%" height="60"></svg>
-                </div>
-                <div class="viz-panel">
-                  <div class="viz-label">Logarithmic (pitch space)</div>
-                  <svg id="viz-log" width="100%" height="60"></svg>
-                </div>
-              </div>
-              <hr />
-              <div id="error-display">
-                <strong>Error</strong>
-                <div style="margin: 6px 0;">
-                  <label for="error-domain">Domain:</label>
-                  <select id="error-domain">
-                    <option value="linear">Linear</option>
-                    <option value="log" selected>Logarithmic</option>
-                  </select>
-                  <label for="error-model" style="margin-left: 10px;">Error model:</label>
-                  <select id="error-model">
-                    <option value="rooted">Rooted (from root)</option>
-                    <option value="pairwise" selected>Pairwise (all intervals)</option>
-                    <option value="all-steps">All-steps (successive only)</option>
+
+      <!-- Tab Navigation -->
+      <div class="tab-nav">
+        <button class="tab-btn active" data-tab="build">Build</button>
+        <button class="tab-btn" data-tab="measure">Measure</button>
+      </div>
+
+      <!-- Tab Content -->
+      <div class="tab-content">
+        <!-- Build Tab -->
+        <div id="tab-build" class="tab-panel active">
+          <table>
+            <tbody>
+            <tr>
+              <td>
+                <hr/>
+                <label for="build-base-frequency"
+                  ><strong>Base frequency</strong> (in Hz, default 220)</label
+                >
+                <input
+                  type="number"
+                  id="build-base-frequency"
+                  name="build-base-frequency"
+                  value="220"
+                  style="width: 80px"
+                />
+                <hr />
+                <div id="build-audio-controls">
+                  <strong>Playback</strong>
+                  <button id="build-btn-play">&#9654; Play</button>
+                  <button id="build-btn-stop">&#9632; Stop</button>
+                  &nbsp;&nbsp;
+                  <label for="build-waveform"><strong>Waveform:</strong></label>
+                  <select id="build-waveform">
+                    <option value="sine">Sine</option>
+                    <option value="triangle">Triangle</option>
+                    <option value="semisine">Semisine</option>
+                    <option value="square">Square</option>
+                    <option value="sawtooth">Saw</option>
                   </select>
                 </div>
-                <button id="btn-calculate-error">Calculate</button>
-                <button id="btn-clear-target">Clear target</button>
+                <hr />
+                <strong>Add/Remove intervals</strong>
                 <br/>
-                <span id="ls-error"></span>
-              </div>
-            </div>
-          </td>
-        </tr>
-      </table>
+                <button id="build-btn-add">Append +1</button>
+                <button id="build-btn-remove">Remove last</button>
+                <button id="build-btn-clear">Keep first only</button>
+                <hr />
+                <strong>Global update</strong>
+                <br/>
+                <button id="build-btn-recalc-deltas">Update from all intervals (recalc deltas)</button>
+                <button id="build-btn-update-from-deltas">Update from all deltas (keep outer interval)</button>
+                <hr />
+                <strong>Intervals</strong>
+                <table id="build-intervals">
+                  <tr>
+                    <td>
+                      <input
+                        type="text"
+                        id="build-interval-1-cents"
+                        name="build-interval-1-cents"
+                        value="400.0"
+                        style="width: 80px"
+                      />
+                      Interval (cents or a\n, from root)
+                      <br/>
+                      <input
+                        type="text"
+                        id="build-interval-1-ratio"
+                        name="build-interval-1-ratio"
+                        style="width: 80px"
+                      />
+                      Ratio (from root)
+                      <br/>
+                      <button id="build-btn-update-interval-1">Update (keep deltas)</button>
+                      <br/>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        id="build-interval-1-delta"
+                        name="build-interval-1-delta"
+                        value="1"
+                        style="width: 80px"
+                      />
+                      Delta
+                      <button id="build-btn-update-delta-1">Update (keep other deltas)</button>
+                      <br/>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+              <td class="visualization-column">
+                <div class="mobile-drag-handle">
+                  <div class="drag-handle-bar"></div>
+                </div>
+                <hr/>
+                <div id="build-visualization">
+                  <strong>Chord Visualization</strong>
+                  <div id="build-viz-controls">
+                    <strong>Window size:</strong>
+                    <label for="build-viz-window">Ratio</label>
+                    <input type="text" id="build-viz-window" value="2/1" style="width: 60px" />
+                    <label for="build-viz-window-cents" style="margin-left: 10px;">Cents</label>
+                    <input type="text" id="build-viz-window-cents" value="1200" style="width: 60px" />
+                    <button id="build-btn-update-viz">Update</button>
+                  </div>
+                  <div id="build-viz-container">
+                    <div class="viz-panel">
+                      <div class="viz-label">Linear (frequency space)</div>
+                      <svg id="build-viz-linear" width="100%" height="60"></svg>
+                    </div>
+                    <div class="viz-panel">
+                      <div class="viz-label">Logarithmic (pitch space)</div>
+                      <svg id="build-viz-log" width="100%" height="60"></svg>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Measure Tab -->
+        <div id="tab-measure" class="tab-panel">
+          <table>
+            <tbody>
+            <tr>
+              <td>
+                <hr/>
+                <label for="measure-base-frequency"
+                  ><strong>Base frequency</strong> (in Hz, default 220)</label
+                >
+                <input
+                  type="number"
+                  id="measure-base-frequency"
+                  name="measure-base-frequency"
+                  value="220"
+                  style="width: 80px"
+                />
+                <hr />
+                <div id="measure-audio-controls">
+                  <strong>Playback</strong>
+                  <button id="measure-btn-play">&#9654; Play Chord</button>
+                  <button id="measure-btn-play-target">&#9654; Play Target</button>
+                  <button id="measure-btn-stop">&#9632; Stop</button>
+                  &nbsp;&nbsp;
+                  <label for="measure-waveform"><strong>Waveform:</strong></label>
+                  <select id="measure-waveform">
+                    <option value="sine">Sine</option>
+                    <option value="triangle">Triangle</option>
+                    <option value="semisine">Semisine</option>
+                    <option value="square">Square</option>
+                    <option value="sawtooth">Saw</option>
+                  </select>
+                </div>
+                <hr />
+                <strong>Intervals</strong>
+                <br/>
+                <button id="measure-btn-add">Add interval</button>
+                <button id="measure-btn-remove">Remove last</button>
+                <button id="measure-btn-copy-from-build">Copy from Build</button>
+                <table id="measure-intervals">
+                  <tr>
+                    <td>
+                      <strong>#1</strong>
+                      <input
+                        type="text"
+                        id="measure-interval-1-cents"
+                        name="measure-interval-1-cents"
+                        value="386.314"
+                        style="width: 80px"
+                      />
+                      Cents
+                      <input
+                        type="text"
+                        id="measure-interval-1-ratio"
+                        name="measure-interval-1-ratio"
+                        value="1.25"
+                        style="width: 80px"
+                      />
+                      Ratio
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        id="measure-interval-1-target-delta"
+                        name="measure-interval-1-target-delta"
+                        value="1"
+                        style="width: 60px"
+                      />
+                      Target delta
+                      <input
+                        type="checkbox"
+                        id="measure-interval-1-free"
+                        name="measure-interval-1-free"
+                      />
+                      Free
+                    </td>
+                  </tr>
+                </table>
+                <hr />
+                <div id="measure-error-controls">
+                  <strong>Error Calculation</strong>
+                  <div style="margin: 6px 0;">
+                    <label for="measure-error-domain">Domain:</label>
+                    <select id="measure-error-domain">
+                      <option value="linear">Linear</option>
+                      <option value="log" selected>Logarithmic</option>
+                    </select>
+                    <label for="measure-error-model" style="margin-left: 10px;">Error model:</label>
+                    <select id="measure-error-model">
+                      <option value="rooted">Rooted (from root)</option>
+                      <option value="pairwise" selected>Pairwise (all intervals)</option>
+                      <option value="all-steps">All-steps (successive only)</option>
+                    </select>
+                  </div>
+                  <button id="measure-btn-calculate">Calculate</button>
+                  <button id="measure-btn-clear-target">Clear target</button>
+                  <br/>
+                  <span id="measure-error-result"></span>
+                </div>
+              </td>
+              <td class="visualization-column">
+                <div class="mobile-drag-handle">
+                  <div class="drag-handle-bar"></div>
+                </div>
+                <hr/>
+                <div id="measure-visualization">
+                  <strong>Chord Visualization</strong>
+                  <div id="measure-viz-controls">
+                    <strong>Window size:</strong>
+                    <label for="measure-viz-window">Ratio</label>
+                    <input type="text" id="measure-viz-window" value="2/1" style="width: 60px" />
+                    <label for="measure-viz-window-cents" style="margin-left: 10px;">Cents</label>
+                    <input type="text" id="measure-viz-window-cents" value="1200" style="width: 60px" />
+                    <button id="measure-btn-update-viz">Update</button>
+                  </div>
+                  <div id="measure-viz-container">
+                    <div class="viz-panel">
+                      <div class="viz-label">Linear (frequency space)</div>
+                      <svg id="measure-viz-linear" width="100%" height="60"></svg>
+                    </div>
+                    <div class="viz-panel">
+                      <div class="viz-label">Logarithmic (pitch space)</div>
+                      <svg id="measure-viz-log" width="100%" height="60"></svg>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </body>
 </html>
