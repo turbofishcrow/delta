@@ -23,6 +23,7 @@
       <div class="tab-nav">
         <button class="tab-btn active" data-tab="build">Build</button>
         <button class="tab-btn" data-tab="measure">Measure Error</button>
+        <button class="tab-btn" data-tab="approximate">Approximate</button>
       </div>
 
       <!-- Tab Content -->
@@ -276,6 +277,82 @@
             </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Approximate Tab -->
+        <div id="tab-approximate" class="tab-panel">
+          <hr/>
+          <label for="approximate-base-frequency"
+            ><strong>Base frequency</strong> (in Hz, default 220)</label
+          >
+          <input
+            type="number"
+            id="approximate-base-frequency"
+            name="approximate-base-frequency"
+            value="220"
+            style="width: 80px"
+          />
+          <hr />
+          <div id="approximate-audio-controls">
+            <strong>Playback</strong>
+            <button id="approximate-btn-stop">&#9632; Stop</button>
+            &nbsp;&nbsp;
+            <label for="approximate-waveform"><strong>Waveform:</strong></label>
+            <select id="approximate-waveform">
+              <option value="sine">Sine</option>
+              <option value="triangle">Triangle</option>
+              <option value="semisine">Semisine</option>
+              <option value="square">Square</option>
+              <option value="sawtooth">Saw</option>
+            </select>
+          </div>
+          <hr />
+          <strong>Equal division</strong>
+          <div style="margin: 6px 0;">
+            <label for="approximate-ed">ed:</label>
+            <input type="number" id="approximate-ed" value="12" style="width: 80px" step="any" min="0" />
+            <label for="approximate-equave" style="margin-left: 10px;">equave:</label>
+            <input type="text" id="approximate-equave" value="2/1" style="width: 80px" />
+          </div>
+          <hr/>
+          <strong>Outer interval bound</strong> (cents)
+          <div style="margin: 6px 0;">
+            <input type="number" id="approximate-outer-bound" value="1200" style="width: 100px" step="any" min="0" />
+          </div>
+          <hr/>
+          <strong>Target delta signature</strong>
+          <div class="button-group">
+            <button id="approximate-btn-add-delta">Add delta</button>
+            <button id="approximate-btn-remove-delta">Remove last</button>
+          </div>
+          <div id="approximate-delta-row" class="delta-input-row">
+            <span class="delta-separator">+</span><input type="text" class="delta-input" id="approximate-delta-1" value="1" />
+            <span class="delta-separator">+</span><input type="text" class="delta-input" id="approximate-delta-2" value="1" />
+            <span class="delta-separator">+</span><input type="text" class="delta-input" id="approximate-delta-3" value="1" />
+          </div>
+          <hr/>
+          <strong>Error settings</strong>
+          <div style="margin: 6px 0;">
+            <label for="approximate-error-domain">Domain:</label>
+            <select id="approximate-error-domain">
+              <option value="linear">Linear</option>
+              <option value="log" selected>Logarithmic</option>
+            </select>
+            <label for="approximate-error-model" style="margin-left: 10px;">Error model:</label>
+            <select id="approximate-error-model">
+              <option value="rooted">Rooted (from root)</option>
+              <option value="pairwise" selected>Pairwise (all intervals)</option>
+              <option value="all-steps">All-steps (successive only)</option>
+            </select>
+          </div>
+          <div style="margin: 6px 0;">
+            <label for="approximate-threshold">Error threshold:</label>
+            <input type="number" id="approximate-threshold" value="10" style="width: 80px" step="any" min="0" />
+          </div>
+          <hr/>
+          <button id="approximate-btn-search">Search</button>
+          <span id="approximate-progress"></span>
+          <div id="approximate-results"></div>
         </div>
       </div>
     </div>

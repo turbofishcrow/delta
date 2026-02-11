@@ -44,6 +44,17 @@ const Utils = {
 
   centsToRatio(cents) {
     return Math.pow(2, cents / 1200);
+  },
+
+  parseRatio(input) {
+    if (typeof input === "string" && input.includes("/")) {
+      const parts = input.split("/");
+      const num = parseFloat(parts[0]);
+      const den = parseFloat(parts[1]);
+      if (num > 0 && den > 0) return num / den;
+      return NaN;
+    }
+    return parseFloat(input);
   }
 };
 
@@ -127,11 +138,11 @@ const Audio = {
 
   setWaveform(waveform, tabPrefix) {
     AppState.currentWaveform = waveform;
-    // Sync waveform selector in other tab
-    const otherPrefix = tabPrefix === 'build' ? 'measure' : 'build';
-    const otherSelect = document.getElementById(`${otherPrefix}-waveform`);
-    if (otherSelect) {
-      otherSelect.value = waveform;
+    // Sync waveform selector across all tabs
+    for (const prefix of ['build', 'measure', 'approximate']) {
+      if (prefix === tabPrefix) continue;
+      const select = document.getElementById(`${prefix}-waveform`);
+      if (select) select.value = waveform;
     }
   }
 };
@@ -191,6 +202,7 @@ const Visualization = {
   },
 
   update(tabPrefix) {
+    if (tabPrefix === 'approximate') return;
     const tabModule = tabPrefix === 'build' ? BuildTab : MeasureTab;
     const frequencies = tabModule.getChordFrequencies();
     if (frequencies.length === 0) return;
@@ -1012,16 +1024,27 @@ const MeasureTab = {
         return;
       }
 
-      // Build target ratios from PDR result (simplified)
+      // Build target ratios from PDR result with optimized free values
+      const resolvedDeltas = targetDeltas.slice();
+      if (result.interiorFreeSegments && result.freeValues) {
+        const offset = result.firstIncludedInterval || 0;
+        result.interiorFreeSegments.forEach((seg, idx) => {
+          const segLength = seg.end - seg.start + 1;
+          const valPerDelta = result.freeValues[idx] / segLength;
+          for (let k = seg.start; k <= seg.end; k++) {
+            resolvedDeltas[k + offset] = valPerDelta;
+          }
+        });
+      }
       targetRatiosArray = [1];
       let cumDelta = 0;
-      for (let i = 0; i < targetDeltas.length; i++) {
-        cumDelta += targetDeltas[i];
+      for (let i = 0; i < resolvedDeltas.length; i++) {
+        cumDelta += resolvedDeltas[i];
         targetRatiosArray.push(1 + cumDelta / result.x);
       }
       targetRatiosArray.isFree = [false, ...isFree];
 
-      deltaSignature = "+" + targetDeltas.map((d, i) => isFree[i] ? "?" : d).join("+");
+      deltaSignature = "+" + resolvedDeltas.map((d, i) => isFree[i] ? d.toFixed(4) : d).join("+");
     } else {
       result = calculateFDRError(ratios, targetDeltas, domain, model);
 
@@ -1102,6 +1125,273 @@ const MeasureTab = {
   }
 };
 
+// ============ Approximate Tab Module ============
+
+const ApproximateTab = {
+  deltaCount: 3,
+  prefix: 'approximate',
+  searching: false,
+  lastResults: [],
+  lastEquaveRatio: 2,
+  lastEd: 12,
+
+  addDelta() {
+    this.deltaCount++;
+    const row = document.getElementById(`${this.prefix}-delta-row`);
+    const sep = document.createElement("span");
+    sep.className = "delta-separator";
+    sep.textContent = "+";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "delta-input";
+    input.id = `${this.prefix}-delta-${this.deltaCount}`;
+    input.value = "1";
+    row.appendChild(sep);
+    row.appendChild(input);
+  },
+
+  removeDelta() {
+    if (this.deltaCount > 1) {
+      const row = document.getElementById(`${this.prefix}-delta-row`);
+      row.removeChild(row.lastElementChild); // input
+      row.removeChild(row.lastElementChild); // separator
+      this.deltaCount--;
+    }
+  },
+
+  getDeltaSignature() {
+    const targetDeltas = [];
+    const isFree = [];
+    for (let i = 1; i <= this.deltaCount; i++) {
+      const input = document.getElementById(`${this.prefix}-delta-${i}`);
+      const val = input.value.trim();
+      if (val === "?") {
+        targetDeltas.push(1);
+        isFree.push(true);
+      } else {
+        const num = parseFloat(val);
+        if (isNaN(num) || num <= 0) {
+          alert(`Delta ${i}: must be a positive number or "?".`);
+          return null;
+        }
+        targetDeltas.push(num);
+        isFree.push(false);
+      }
+    }
+    return { targetDeltas, isFree };
+  },
+
+  async search() {
+    if (this.searching) return;
+
+    const ed = parseFloat(document.getElementById(`${this.prefix}-ed`).value);
+    const equaveStr = document.getElementById(`${this.prefix}-equave`).value;
+    const outerBound = parseFloat(document.getElementById(`${this.prefix}-outer-bound`).value);
+    const domain = document.getElementById(`${this.prefix}-error-domain`).value;
+    const model = document.getElementById(`${this.prefix}-error-model`).value;
+    const threshold = parseFloat(document.getElementById(`${this.prefix}-threshold`).value);
+
+    if (isNaN(ed) || ed <= 0) { alert("ed must be a positive number."); return; }
+    const equaveRatio = Utils.parseRatio(equaveStr);
+    if (isNaN(equaveRatio) || equaveRatio <= 1) { alert("Equave must be a ratio greater than 1."); return; }
+    if (isNaN(outerBound) || outerBound <= 0) { alert("Outer interval bound must be positive."); return; }
+    if (isNaN(threshold) || threshold <= 0) { alert("Error threshold must be positive."); return; }
+
+    const sig = this.getDeltaSignature();
+    if (!sig) return;
+    const { targetDeltas, isFree } = sig;
+    const m = targetDeltas.length;
+    const hasFreeDeltas = isFree.some(f => f);
+
+    const equaveCents = 1200 * Math.log2(equaveRatio);
+    const stepCents = equaveCents / ed;
+    const maxSteps = Math.floor(outerBound / stepCents);
+
+    if (maxSteps < m) {
+      document.getElementById(`${this.prefix}-results`).innerHTML =
+        "No chords possible (outer bound too small for this many deltas).";
+      return;
+    }
+
+    // Count total combinations C(maxSteps, m)
+    let totalCombinations = 1;
+    for (let i = 0; i < m; i++) {
+      totalCombinations = totalCombinations * (maxSteps - i) / (i + 1);
+    }
+    totalCombinations = Math.round(totalCombinations);
+
+    this.searching = true;
+    const searchBtn = document.getElementById(`${this.prefix}-btn-search`);
+    searchBtn.disabled = true;
+    const progressEl = document.getElementById(`${this.prefix}-progress`);
+    const resultsEl = document.getElementById(`${this.prefix}-results`);
+    resultsEl.innerHTML = "";
+    progressEl.textContent = `Searching... 0 / ${totalCombinations} chords tested`;
+
+    const results = [];
+    let tested = 0;
+    const BATCH_SIZE = 2000;
+
+    // Generate combinations iteratively using an index array
+    const indices = [];
+    for (let i = 0; i < m; i++) indices.push(i + 1); // [1, 2, ..., m]
+
+    await new Promise((resolve) => {
+      function processBatch() {
+        let batchCount = 0;
+        while (batchCount < BATCH_SIZE) {
+          if (indices === null || indices[0] > maxSteps - m + 1) {
+            // Done
+            progressEl.textContent = `Done. ${tested} chords tested, ${results.length} found.`;
+            resolve();
+            return;
+          }
+
+          // Current combination is indices[0..m-1]
+          const ratios = [];
+          for (let j = 0; j < m; j++) {
+            ratios.push(Math.pow(equaveRatio, indices[j] / ed));
+          }
+
+          let result;
+          if (hasFreeDeltas) {
+            result = calculatePDRError(ratios, targetDeltas, isFree, domain, model);
+          } else {
+            result = calculateFDRError(ratios, targetDeltas, domain, model);
+          }
+
+          if (result && result.error < threshold) {
+            // Build target ratios with optimized free delta values
+            const resolvedDeltas = targetDeltas.slice();
+            if (hasFreeDeltas && result.interiorFreeSegments && result.freeValues) {
+              const offset = result.firstIncludedInterval || 0;
+              result.interiorFreeSegments.forEach((seg, idx) => {
+                const segLength = seg.end - seg.start + 1;
+                const valPerDelta = result.freeValues[idx] / segLength;
+                for (let k = seg.start; k <= seg.end; k++) {
+                  resolvedDeltas[k + offset] = valPerDelta;
+                }
+              });
+            }
+            const targetRatios = [1];
+            let cumDelta = 0;
+            for (let di = 0; di < resolvedDeltas.length; di++) {
+              cumDelta += resolvedDeltas[di];
+              targetRatios.push(1 + cumDelta / result.x);
+            }
+
+            results.push({
+              steps: [0, ...indices.slice()],
+              cents: [0, ...indices.map(k => k * stepCents)],
+              error: result.error,
+              targetRatios
+            });
+          }
+
+          tested++;
+          batchCount++;
+
+          // Advance to next combination
+          let i = m - 1;
+          while (i >= 0 && indices[i] >= maxSteps - (m - 1 - i)) {
+            i--;
+          }
+          if (i < 0) {
+            indices[0] = maxSteps + 1; // signal done
+          } else {
+            indices[i]++;
+            for (let j = i + 1; j < m; j++) {
+              indices[j] = indices[j - 1] + 1;
+            }
+          }
+        }
+
+        progressEl.textContent = `Searching... ${tested} / ${totalCombinations} chords tested (${results.length} found so far)`;
+        setTimeout(processBatch, 0);
+      }
+
+      processBatch();
+    });
+
+    results.sort((a, b) => a.error - b.error);
+    this.lastResults = results;
+    this.lastEquaveRatio = equaveRatio;
+    this.lastEd = ed;
+    this.displayResults(results, domain);
+
+    this.searching = false;
+    searchBtn.disabled = false;
+  },
+
+  getBaseFrequency() {
+    const freq = parseFloat(document.getElementById(`${this.prefix}-base-frequency`).value);
+    if (isNaN(freq) || freq <= 0) return AppState.DEFAULT_PITCH_STANDARD;
+    return freq;
+  },
+
+  playChord(index) {
+    const r = this.lastResults[index];
+    if (!r) return;
+    const baseFreq = this.getBaseFrequency();
+    const frequencies = r.steps.map(k => baseFreq * Math.pow(this.lastEquaveRatio, k / this.lastEd));
+    Audio.playFrequencies(frequencies);
+  },
+
+  playTarget(index) {
+    const r = this.lastResults[index];
+    if (!r || !r.targetRatios) return;
+    const baseFreq = this.getBaseFrequency();
+    const frequencies = r.targetRatios.map(ratio => baseFreq * ratio);
+    Audio.playFrequencies(frequencies);
+  },
+
+  displayResults(results, domain) {
+    const resultsEl = document.getElementById(`${this.prefix}-results`);
+    if (results.length === 0) {
+      resultsEl.innerHTML = "<p>No chords found below the error threshold.</p>";
+      return;
+    }
+
+    const errorUnit = domain === "log" ? " ¢" : "";
+    const errorDecimals = domain === "log" ? 3 : 6;
+
+    let html = `<table><thead><tr><th>#</th><th>Steps</th><th>Cents</th><th>Error</th><th></th></tr></thead><tbody>`;
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const stepsStr = r.steps.join(", ");
+      const centsStr = r.cents.map(c => c.toFixed(1)).join(", ");
+      html += `<tr><td>${i + 1}</td><td>${stepsStr}</td><td>${centsStr}</td><td>${r.error.toFixed(errorDecimals)}${errorUnit}</td>` +
+        `<td><button class="approx-play-btn" data-index="${i}">&#9654;</button>` +
+        `<button class="approx-play-target-btn" data-index="${i}">&#9654; Target</button></td></tr>`;
+    }
+    html += `</tbody></table>`;
+    resultsEl.innerHTML = html;
+  },
+
+  init() {
+    document.getElementById(`${this.prefix}-btn-add-delta`).addEventListener("click", () => this.addDelta());
+    document.getElementById(`${this.prefix}-btn-remove-delta`).addEventListener("click", () => this.removeDelta());
+    document.getElementById(`${this.prefix}-btn-search`).addEventListener("click", () => this.search());
+    document.getElementById(`${this.prefix}-btn-stop`).addEventListener("click", () => Audio.stop());
+    document.getElementById(`${this.prefix}-waveform`).addEventListener("change", (e) => {
+      Audio.setWaveform(e.target.value, this.prefix);
+    });
+
+    // Event delegation for play buttons in results
+    document.getElementById(`${this.prefix}-results`).addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      const index = parseInt(btn.dataset.index);
+      if (isNaN(index)) return;
+      if (btn.classList.contains("approx-play-btn")) {
+        this.playChord(index);
+      } else if (btn.classList.contains("approx-play-target-btn")) {
+        this.playTarget(index);
+      }
+    });
+  }
+};
+
 // ============ Mobile Drag Handle ============
 
 function setupMobileDragHandle() {
@@ -1160,5 +1450,6 @@ document.addEventListener('DOMContentLoaded', () => {
   TabController.init();
   BuildTab.init();
   MeasureTab.init();
+  ApproximateTab.init();
   setupMobileDragHandle();
 });

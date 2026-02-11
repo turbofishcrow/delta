@@ -681,7 +681,8 @@ svg {
 
 #audio-controls,
 #build-audio-controls,
-#measure-audio-controls {
+#measure-audio-controls,
+#approximate-audio-controls {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -690,7 +691,8 @@ svg {
 
 #audio-controls strong,
 #build-audio-controls strong,
-#measure-audio-controls strong {
+#measure-audio-controls strong,
+#approximate-audio-controls strong {
   margin-right: 4px;
 }
 
@@ -813,4 +815,74 @@ svg {
   stroke: #fb4;
   stroke-width: 2;
   stroke-dasharray: 3 2;
+}
+
+/* Delta input row (Approximate tab) */
+.delta-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: 6px 0;
+}
+
+.delta-input {
+  width: 50px;
+  text-align: center;
+  font-size: 1em;
+  padding: 0.2em;
+}
+
+.delta-separator {
+  font-size: 1.2em;
+  color: #aaa;
+  user-select: none;
+}
+
+/* Approximate results table */
+#approximate-results {
+  margin-top: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+#approximate-results table {
+  width: 100%;
+  table-layout: auto;
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+#approximate-results th {
+  position: sticky;
+  top: 0;
+  background: var(--c3);
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid #666;
+}
+
+#approximate-results td {
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+#approximate-results tr:nth-child(even) {
+  background-color: rgb(20%, 10%, 30%);
+}
+
+#approximate-results tr:nth-child(odd) {
+  background-color: rgb(10%, 5%, 20%);
+}
+
+#approximate-progress {
+  margin-left: 8px;
+  color: #aaa;
+}
+
+.approx-play-btn,
+.approx-play-target-btn {
+  padding: 0.2em 0.5em;
+  font-size: 0.85em;
+  margin: 1px;
 }
