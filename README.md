@@ -76,6 +76,26 @@ The result shows the error, optimal `x`, and (for PDR) the optimized values of t
 - Lower error = closer to the target delta signature
 - Error of 0 = exact match
 
+### Approximation Search
+
+The **Approximate** tab searches an equal division for chords that best approximate a target delta signature.
+
+**Inputs:**
+- **Equal division**: The number of equal divisions (`ed`) of an equave (a JI ratio, e.g., `2/1` for an octave, `3/1` for a tritave)
+- **Outer interval bound** (cents): Maximum size of the outermost interval
+- **Target delta signature**: A horizontal row of delta values. Each can be a positive number (fixed) or `?` (free, optimized per chord)
+- **Error settings**: Domain (linear/logarithmic) and error model (rooted/pairwise/all-steps), same as in Measure Error
+- **Error threshold**: Only chords with error below this value are shown
+
+**Output:**
+A list of all matching chords sorted by error, each displayed as:
+- **Step counts**: `0, k₁, k₂, ...` (positions in the equal division)
+- **Cent values**: `0.0, c₁, c₂, ...` (to the nearest 0.1 cent)
+- **Error**: The least-squares error against the target
+- **Play buttons**: Play the equal-tempered chord or its ideal DR target
+
+The search enumerates all possible chords (combinations of step positions) within the outer bound and computes the error for each. A progress indicator keeps the UI responsive during large searches.
+
 ### Audio Playback
 
 Listen to your chords with five waveform options:
