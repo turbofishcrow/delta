@@ -1358,9 +1358,9 @@ const ApproximateTab = {
     let html = `<table><thead><tr><th>#</th><th>Steps</th><th>Cents</th><th>Target (cents)</th><th>Error</th><th></th></tr></thead><tbody>`;
     for (let i = 0; i < results.length; i++) {
       const r = results[i];
-      const stepsStr = r.steps.join(", ");
-      const centsStr = r.cents.map(c => c.toFixed(1)).join(", ");
-      const targetCentsStr = r.targetRatios.map(ratio => (1200 * Math.log2(ratio)).toFixed(1)).join(", ");
+      const stepsStr = r.steps.join(" ");
+      const centsStr = r.cents.map(c => c.toFixed(1)).join(" ");
+      const targetCentsStr = r.targetRatios.map(ratio => (1200 * Math.log2(ratio)).toFixed(1)).join(" ");
       html += `<tr><td>${i + 1}</td><td>${stepsStr}</td><td>${centsStr}</td><td>${targetCentsStr}</td><td>${r.error.toFixed(errorDecimals)}${errorUnit}</td>` +
         `<td><button class="approx-play-btn" data-index="${i}">&#9654;</button>` +
         `<button class="approx-play-target-btn" data-index="${i}">&#9654; Target</button></td></tr>`;

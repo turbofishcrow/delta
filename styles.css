@@ -849,7 +849,6 @@ svg {
 #approximate-results table {
   width: 100%;
   table-layout: auto;
-  font-family: var(--mono);
   font-size: 0.9em;
 }
 
