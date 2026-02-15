@@ -844,6 +844,7 @@ svg {
   margin-top: 12px;
   max-height: 60vh;
   overflow-y: auto;
+  overflow-x: auto;
 }
 
 #approximate-results table {

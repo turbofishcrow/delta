@@ -1128,7 +1128,7 @@ const MeasureTab = {
 // ============ Approximate Tab Module ============
 
 const ApproximateTab = {
-  deltaCount: 3,
+  deltaCount: 2,
   prefix: 'approximate',
   searching: false,
   lastResults: [],
