@@ -1164,6 +1164,7 @@ const ApproximateTab = {
     const isFree = [];
     for (let i = 1; i <= this.deltaCount; i++) {
       const input = document.getElementById(`${this.prefix}-delta-${i}`);
+      if (!input) continue;
       const val = input.value.trim();
       if (val === "?") {
         targetDeltas.push(1);
@@ -1201,6 +1202,7 @@ const ApproximateTab = {
     if (!sig) return;
     const { targetDeltas, isFree } = sig;
     const m = targetDeltas.length;
+    if (m === 0) { alert("Add at least one delta."); return; }
     const hasFreeDeltas = isFree.some(f => f);
 
     const equaveCents = 1200 * Math.log2(equaveRatio);
@@ -1228,99 +1230,100 @@ const ApproximateTab = {
     resultsEl.innerHTML = "";
     progressEl.textContent = `Searching... 0 / ${totalCombinations} chords tested`;
 
-    const results = [];
-    let tested = 0;
-    const BATCH_SIZE = 2000;
+    try {
+      const results = [];
+      let tested = 0;
+      const BATCH_SIZE = 2000;
 
-    // Generate combinations iteratively using an index array
-    const indices = [];
-    for (let i = 0; i < m; i++) indices.push(i + 1); // [1, 2, ..., m]
+      // Generate combinations iteratively using an index array
+      const indices = [];
+      for (let i = 0; i < m; i++) indices.push(i + 1); // [1, 2, ..., m]
 
-    await new Promise((resolve) => {
-      function processBatch() {
-        let batchCount = 0;
-        while (batchCount < BATCH_SIZE) {
-          if (indices === null || indices[0] > maxSteps - m + 1) {
-            // Done
-            progressEl.textContent = `Done. ${tested} chords tested, ${results.length} found.`;
-            resolve();
-            return;
-          }
+      await new Promise(function(resolve) {
+        function processBatch() {
+          var batchCount = 0;
+          while (batchCount < BATCH_SIZE) {
+            if (indices[0] > maxSteps - m + 1) {
+              progressEl.textContent = "Done. " + tested + " chords tested, " + results.length + " found.";
+              resolve();
+              return;
+            }
 
-          // Current combination is indices[0..m-1]
-          const ratios = [];
-          for (let j = 0; j < m; j++) {
-            ratios.push(Math.pow(equaveRatio, indices[j] / ed));
-          }
+            var ratios = [];
+            for (var j = 0; j < m; j++) {
+              ratios.push(Math.pow(equaveRatio, indices[j] / ed));
+            }
 
-          let result;
-          if (hasFreeDeltas) {
-            result = calculatePDRError(ratios, targetDeltas, isFree, domain, model);
-          } else {
-            result = calculateFDRError(ratios, targetDeltas, domain, model);
-          }
+            var result;
+            if (hasFreeDeltas) {
+              result = calculatePDRError(ratios, targetDeltas, isFree, domain, model);
+            } else {
+              result = calculateFDRError(ratios, targetDeltas, domain, model);
+            }
 
-          if (result && result.error < threshold) {
-            // Build target ratios with optimized free delta values
-            const resolvedDeltas = targetDeltas.slice();
-            if (hasFreeDeltas && result.interiorFreeSegments && result.freeValues) {
-              const offset = result.firstIncludedInterval || 0;
-              result.interiorFreeSegments.forEach((seg, idx) => {
-                const segLength = seg.end - seg.start + 1;
-                const valPerDelta = result.freeValues[idx] / segLength;
-                for (let k = seg.start; k <= seg.end; k++) {
-                  resolvedDeltas[k + offset] = valPerDelta;
-                }
+            if (result && result.error < threshold) {
+              var resolvedDeltas = targetDeltas.slice();
+              if (hasFreeDeltas && result.interiorFreeSegments && result.freeValues) {
+                var offset = result.firstIncludedInterval || 0;
+                result.interiorFreeSegments.forEach(function(seg, idx) {
+                  var segLength = seg.end - seg.start + 1;
+                  var valPerDelta = result.freeValues[idx] / segLength;
+                  for (var k = seg.start; k <= seg.end; k++) {
+                    resolvedDeltas[k + offset] = valPerDelta;
+                  }
+                });
+              }
+              var targetRatios = [1];
+              var cumDelta = 0;
+              for (var di = 0; di < resolvedDeltas.length; di++) {
+                cumDelta += resolvedDeltas[di];
+                targetRatios.push(1 + cumDelta / result.x);
+              }
+
+              results.push({
+                steps: [0].concat(indices.slice()),
+                cents: [0].concat(indices.map(function(k) { return k * stepCents; })),
+                error: result.error,
+                targetRatios: targetRatios
               });
             }
-            const targetRatios = [1];
-            let cumDelta = 0;
-            for (let di = 0; di < resolvedDeltas.length; di++) {
-              cumDelta += resolvedDeltas[di];
-              targetRatios.push(1 + cumDelta / result.x);
+
+            tested++;
+            batchCount++;
+
+            // Advance to next combination
+            var i = m - 1;
+            while (i >= 0 && indices[i] >= maxSteps - (m - 1 - i)) {
+              i--;
             }
-
-            results.push({
-              steps: [0, ...indices.slice()],
-              cents: [0, ...indices.map(k => k * stepCents)],
-              error: result.error,
-              targetRatios
-            });
-          }
-
-          tested++;
-          batchCount++;
-
-          // Advance to next combination
-          let i = m - 1;
-          while (i >= 0 && indices[i] >= maxSteps - (m - 1 - i)) {
-            i--;
-          }
-          if (i < 0) {
-            indices[0] = maxSteps + 1; // signal done
-          } else {
-            indices[i]++;
-            for (let j = i + 1; j < m; j++) {
-              indices[j] = indices[j - 1] + 1;
+            if (i < 0) {
+              indices[0] = maxSteps + 1;
+            } else {
+              indices[i]++;
+              for (var j2 = i + 1; j2 < m; j2++) {
+                indices[j2] = indices[j2 - 1] + 1;
+              }
             }
           }
+
+          progressEl.textContent = "Searching... " + tested + " / " + totalCombinations + " chords tested (" + results.length + " found so far)";
+          setTimeout(processBatch, 0);
         }
 
-        progressEl.textContent = `Searching... ${tested} / ${totalCombinations} chords tested (${results.length} found so far)`;
-        setTimeout(processBatch, 0);
-      }
+        processBatch();
+      });
 
-      processBatch();
-    });
-
-    results.sort((a, b) => a.error - b.error);
-    this.lastResults = results;
-    this.lastEquaveRatio = equaveRatio;
-    this.lastEd = ed;
-    this.displayResults(results, domain);
-
-    this.searching = false;
-    searchBtn.disabled = false;
+      results.sort(function(a, b) { return a.error - b.error; });
+      this.lastResults = results;
+      this.lastEquaveRatio = equaveRatio;
+      this.lastEd = ed;
+      this.displayResults(results, domain);
+    } catch (e) {
+      document.getElementById(`${this.prefix}-results`).textContent = "Error: " + e.message;
+    } finally {
+      this.searching = false;
+      searchBtn.disabled = false;
+    }
   },
 
   getBaseFrequency() {
