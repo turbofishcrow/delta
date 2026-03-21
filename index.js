@@ -172,18 +172,20 @@ const Visualization = {
       }
       return 2;
     }
-
-    const input = document.getElementById(`${tabPrefix}-viz-window`).value;
-    if (input.includes("/")) {
-      const parts = input.split("/");
-      const num = parseFloat(parts[0]);
-      const den = parseFloat(parts[1]);
-      if (!isNaN(num) && !isNaN(den) && den > 0) {
-        return num / den;
+    if (tabPrefix === "build" || tabPrefix === "measure") {
+      const input = document.getElementById(`${tabPrefix}-viz-window`).value;
+      if (input.includes("/")) {
+        const parts = input.split("/");
+        const num = parseFloat(parts[0]);
+        const den = parseFloat(parts[1]);
+        if (!isNaN(num) && !isNaN(den) && den > 0) {
+          return num / den;
+        }
       }
+      const val = parseFloat(input);
+      return isNaN(val) || val <= 1 ? 2 : val;
     }
-    const val = parseFloat(input);
-    return isNaN(val) || val <= 1 ? 2 : val;
+    return undefined;
   },
 
   syncWindowFromRatio(tabPrefix) {
@@ -1396,6 +1398,123 @@ const ApproximateTab = {
   }
 };
 
+const OptimizeTab = {
+  intervalCount: 1,
+  prefix: 'optimize',
+  
+  addInterval() {
+    this.intervalCount++;
+    const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+    const newRow = document.createElement("tr");
+    newRow.innerHTML = `
+      <td>p^<input type="text" class="term-input" id="optimize-p-pow-${this.intervalCount}" /> * g^<input type="text" class="term-input" id="optimize-g-pow-${this.intervalCount}" /></td>
+      <td><span class="delta-separator">+</span><input type="text" class="delta-input" id="optimize-delta-${this.intervalCount}" value="1" /></td>
+    `;
+    intervalTable.appendChild(newRow);
+  },
+
+  removeInterval() {
+    const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+    if (this.intervalCount > 1) {
+      intervalTable.removeChild(intervalTable.lastElementChild);
+      this.intervalCount--;
+      // this.refreshIfPlaying();
+    }
+  },
+
+  clearIntervals() {
+    const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+    while (this.intervalCount > 1) {
+      intervalTable.removeChild(intervalTable.lastElementChild);
+      this.intervalCount--;
+    }
+    // this.refreshIfPlaying();
+  },
+
+  calculateGenerator() {
+    const period = Math.pow(
+        parseFloat(document.getElementById(`optimize-period-base`).value),
+        parseFloat(document.getElementById(`optimize-period-pow`).value)
+    );
+    // Get non-free deltas
+    let nonFreeDeltas = [];
+    let i = 0;
+    while (i < this.intervalCount) {
+      const currentDelta = parseFloat(document.getElementById(`optimize-delta-${i + 1}`).value);
+      if (currentDelta && isFinite(currentDelta)) {
+        nonFreeDeltas.push(currentDelta);
+      }
+      i++;
+    }
+    const resultsEl = document.getElementById(`${this.prefix}-results`);
+    const freqTerms = [];
+    if (nonFreeDeltas.length === 2) {
+      i = 0;
+      let iNonFreeDeltas = 0; // number of non-free deltas seen
+      while (iNonFreeDeltas < 2) {
+        const currentDelta = parseFloat(document.getElementById(`optimize-delta-${i + 1}`).value);
+        if (currentDelta && isFinite(currentDelta)) { // if current delta is not free
+          iNonFreeDeltas++;
+          // [c, i] represents c*g^i
+          // currFrequencyTerm is cumulative
+          const currFrequencyTerm = [
+              Math.pow(period, parseFloat(document.getElementById(`optimize-p-pow-${i + 1}`).value)),
+              parseInt(document.getElementById(`optimize-g-pow-${i + 1}`).value),
+          ];
+          const prevFrequencyTerm = i === 0 ? [1, 0] : [
+              Math.pow(period, parseFloat(document.getElementById(`optimize-p-pow-${i}`).value)),
+              parseInt(document.getElementById(`optimize-g-pow-${i}`).value),
+          ];
+          freqTerms.push(prevFrequencyTerm);
+          freqTerms.push(currFrequencyTerm);
+        }
+        i++;
+      }
+      const minPower = Math.min(
+          freqTerms[0][1],
+          freqTerms[1][1],
+          freqTerms[2][1],
+          freqTerms[3][1],
+      );
+      const maxPower = Math.max(
+          freqTerms[0][1],
+          freqTerms[1][1],
+          freqTerms[2][1],
+          freqTerms[3][1],
+      );
+      const deltaRatio = nonFreeDeltas[1] / nonFreeDeltas[0];
+      const polynomial = new Array(maxPower - minPower + 1).fill(0); // e.g. maxPower = 3, minPower = -3 => {-3, ..., 3} has 7 elements
+      
+      // (freqTerms[3] - freqTerms[2]) / (freqTerms[1] - freqTerms[0]) == nonFreeDeltas[1] / nonFreeDeltas[0] == deltaRatio
+      // => freqTerms[3] - freqTerms[2] == deltaRatio * freqTerms[1] - deltaRatio * freqTerms[0]
+      // => freqTerms[3] - freqTerms[2] - deltaRatio * freqTerms[1] + deltaRatio * freqTerms[0] == 0
+      // Now divide by the minimum power of g to get the polynomial to solve
+
+      // Use += to combine any like terms
+      polynomial[freqTerms[0][1] - minPower] += deltaRatio * freqTerms[0][0];
+      polynomial[freqTerms[1][1] - minPower] += -deltaRatio * freqTerms[1][0];
+      polynomial[freqTerms[2][1] - minPower] += -freqTerms[2][0];
+      polynomial[freqTerms[3][1] - minPower] += freqTerms[3][0];
+      const gFreqRatio = findRootConstrained(polynomial, 1, period);
+      if (gFreqRatio) {
+        resultsEl.innerHTML = `
+            Optimal generator g = ${Math.round(Utils.ratioToCents(gFreqRatio) * 1000) / 1000}¢
+        `;
+      } else {
+        resultsEl.innerHTML = "Could not find generator with error 0";
+      }
+    } else {
+      resultsEl.innerHTML = "Need exactly 2 non-free (numeric, not blank) deltas";
+    }
+  },
+  init() {
+    document.getElementById(`${this.prefix}-btn-add-interval`).addEventListener("click", () => this.addInterval());
+    document.getElementById(`${this.prefix}-btn-remove-interval`).addEventListener("click", () => this.removeInterval());
+    document.getElementById(`${this.prefix}-btn-clear`).addEventListener("click", () => this.clearIntervals());
+    document.getElementById(`${this.prefix}-btn-calculate`).addEventListener("click", () => this.calculateGenerator());
+  }
+};
+
 // ============ Mobile Drag Handle ============
 
 function setupMobileDragHandle() {
@@ -1455,5 +1574,6 @@ document.addEventListener('DOMContentLoaded', () => {
   BuildTab.init();
   MeasureTab.init();
   ApproximateTab.init();
+  OptimizeTab.init();
   setupMobileDragHandle();
 });

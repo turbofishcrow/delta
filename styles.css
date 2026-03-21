@@ -839,6 +839,13 @@ svg {
   user-select: none;
 }
 
+.term-input {
+  width: 50px;
+  text-align: center;
+  font-size: 1em;
+  padding: 0.2em;
+}
+
 /* Approximate results table */
 #approximate-results {
   margin-top: 12px;
