@@ -90,7 +90,7 @@ function findRoot(p, lowerBound, upperBound, expandTries, maxTries, tolerance) {
   return b;
 }
 
-function findRootConstrained(poly, lowerBound, upperBound, expandTries=100, maxTries=1000, tolerance=1e-7) {
+function findRootConstrained(poly, lowerBound, upperBound, expandTries=100, maxTries=1000, tolerance=5e-5) {
   const maybeRoot = findRoot(poly, lowerBound, upperBound, expandTries, maxTries, tolerance);
   if (maybeRoot && maybeRoot > lowerBound && maybeRoot < upperBound) {
     return maybeRoot;
