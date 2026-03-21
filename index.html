@@ -375,6 +375,28 @@
               style="width: 80px"
             />
           <hr/>
+          <label for="optimize-lower-bound"
+            ><strong>Gen. lower bound</strong> (in cents, default = 1/1)</label
+          >
+          <input
+            type="number"
+            id="optimize-lower-bound"
+            name="optimize-lower-bound"
+            style="width: 80px"
+          />
+          <br/>
+          <label for="optimize-upper-bound"
+            ><strong>Gen. upper bound</strong> (in cents, default = period)</label
+          >
+
+          <input
+            type="number"
+            id="optimize-upper-bound"
+            name="optimize-upper-bound"
+            style="width: 80px"
+          />
+
+          <hr/>
 
           <strong>Chord and target delta signature (need exactly 2 non-free deltas for exact solution)</strong>
 
@@ -383,6 +405,7 @@
             <button id="optimize-btn-remove-interval">Remove last</button>
             <button id="optimize-btn-clear">Keep first only</button>
           </div>
+
           <table id="optimize-intervals">
             <tr>
               <th>Frequency (from root)</th>

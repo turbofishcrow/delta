@@ -1433,14 +1433,14 @@ const OptimizeTab = {
 
   calculateGenerator() {
     const period = Math.pow(
-        parseFloat(document.getElementById(`optimize-period-base`).value),
-        parseFloat(document.getElementById(`optimize-period-pow`).value)
+        parseFloat(document.getElementById(`${this.prefix}-period-base`).value),
+        parseFloat(document.getElementById(`${this.prefix}-period-pow`).value)
     );
     // Get non-free deltas
     let nonFreeDeltas = [];
     let i = 0;
     while (i < this.intervalCount) {
-      const currentDelta = parseFloat(document.getElementById(`optimize-delta-${i + 1}`).value);
+      const currentDelta = parseFloat(document.getElementById(`${this.prefix}-delta-${i + 1}`).value);
       if (currentDelta && isFinite(currentDelta)) {
         nonFreeDeltas.push(currentDelta);
       }
@@ -1452,18 +1452,18 @@ const OptimizeTab = {
       i = 0;
       let iNonFreeDeltas = 0; // number of non-free deltas seen
       while (iNonFreeDeltas < 2) {
-        const currentDelta = parseFloat(document.getElementById(`optimize-delta-${i + 1}`).value);
+        const currentDelta = parseFloat(document.getElementById(`${this.prefix}-delta-${i + 1}`).value);
         if (currentDelta && isFinite(currentDelta)) { // if current delta is not free
           iNonFreeDeltas++;
           // [c, i] represents c*g^i
           // currFrequencyTerm is cumulative
           const currFrequencyTerm = [
-              Math.pow(period, parseFloat(document.getElementById(`optimize-p-pow-${i + 1}`).value)),
-              parseInt(document.getElementById(`optimize-g-pow-${i + 1}`).value),
+              Math.pow(period, parseFloat(document.getElementById(`${this.prefix}-p-pow-${i + 1}`).value)),
+              parseInt(document.getElementById(`${this.prefix}-g-pow-${i + 1}`).value),
           ];
           const prevFrequencyTerm = i === 0 ? [1, 0] : [
-              Math.pow(period, parseFloat(document.getElementById(`optimize-p-pow-${i}`).value)),
-              parseInt(document.getElementById(`optimize-g-pow-${i}`).value),
+              Math.pow(period, parseFloat(document.getElementById(`${this.prefix}-p-pow-${i}`).value)),
+              parseInt(document.getElementById(`${this.prefix}-g-pow-${i}`).value),
           ];
           freqTerms.push(prevFrequencyTerm);
           freqTerms.push(currFrequencyTerm);
@@ -1495,13 +1495,17 @@ const OptimizeTab = {
       polynomial[freqTerms[1][1] - minPower] += -deltaRatio * freqTerms[1][0];
       polynomial[freqTerms[2][1] - minPower] += -freqTerms[2][0];
       polynomial[freqTerms[3][1] - minPower] += freqTerms[3][0];
-      const gFreqRatio = findRootConstrained(polynomial, 1, period);
+      const lbInput = parseFloat(document.getElementById(`${this.prefix}-lower-bound`).value);
+      const lb = isFinite(lbInput) ? Math.pow(2, lbInput / 1200) : 1;
+      const ubInput = parseFloat(document.getElementById(`${this.prefix}-upper-bound`).value);
+      const ub = isFinite(ubInput) ? Math.pow(2, ubInput / 1200) : period;
+      const gFreqRatio = findRootConstrained(polynomial, lb, ub);
       if (gFreqRatio) {
         resultsEl.innerHTML = `
             Optimal generator g = ${Math.round(Utils.ratioToCents(gFreqRatio) * 1000) / 1000}¢
         `;
       } else {
-        resultsEl.innerHTML = "Could not find generator with error 0";
+        resultsEl.innerHTML = "Could not find unique generator with error 0";
       }
     } else {
       resultsEl.innerHTML = "Need exactly 2 non-free (numeric, not blank) deltas";
