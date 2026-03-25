@@ -1649,13 +1649,13 @@ const OptimizeTab = {
             }
             const { targetDeltas, isFree } = this.getDeltaSignature(chordIndex);
             if (isFree.some((f) => f)) { // If some delta is free
-              const e = calculatePDRError(ratios, targetDeltas, isFree, domain, model).error;
-              sum += e;
-              leastSquaresErrorsTemp[chordIndex] = Math.sqrt(e);
+              const e = calculatePDRError(ratios, targetDeltas, isFree, domain, model).error; // This has the square root so square it before summing
+              sum += e * e;
+              leastSquaresErrorsTemp[chordIndex] = e;
             } else { // if no delta is free
-              const e = calculateFDRError(ratios, targetDeltas, domain, model).error;
-              sum += e;
-              leastSquaresErrorsTemp[chordIndex] = Math.sqrt(e);
+              const e = calculateFDRError(ratios, targetDeltas, domain, model).error; // This has the square root so square it before summing
+              sum += e * e;
+              leastSquaresErrorsTemp[chordIndex] = e;
             }
           }
           let finalError = sum;
@@ -1701,6 +1701,7 @@ const OptimizeTab = {
         }
 
         const g = bestX;
+        // bestError is sum of squares so take the sqrt to get the least-squares error of least-squares errors
         const lsError = Math.sqrt(bestError);
         
         // Display final least-squares error for each chord
