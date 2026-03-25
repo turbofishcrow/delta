@@ -1649,7 +1649,7 @@ const OptimizeTab = {
             }
             const { targetDeltas, isFree } = this.getDeltaSignature(chordIndex);
             if (isFree.some((f) => f)) { // If some delta is free
-              const e = calculatePDRError(ratios, targetDeltas, isFree, domain, model, {maxIterations: 10000, acceptFailure: true}).error; // This has the square root so square it before summing
+              const e = calculatePDRError(ratios, targetDeltas, isFree, domain, model, {maxIterations: 10000, tolerance: 1e-7}).error; // This has the square root so square it before summing
               sum += e * e;
               leastSquaresErrorsTemp[chordIndex] = e;
             } else { // if no delta is free
