@@ -911,9 +911,10 @@ function preprocessPDRChordData(intervalsFromRoot, targetDeltas, isFree) {
  * @param {Array<boolean>} isFree - Whether each delta is free [true/false, ...]
  * @param {string} domain - "linear" or "log" (logarithmic)
  * @param {string} model - "rooted", "pairwise", or "all-steps"
+ * @param {Object} options - Calculation options
  * @returns {{error: number, x: number, freeValues: number[]}|null} - Result or null if error
  */
-function calculatePDRError(intervalsFromRoot, targetDeltas, isFree, domain, model) {
+function calculatePDRError(intervalsFromRoot, targetDeltas, isFree, domain, model, options={}) {
   // Process chord data: coalesce consecutive free deltas and trim leading/trailing free segments
   const processed = preprocessPDRChordData(intervalsFromRoot, targetDeltas, isFree);
   if (!processed) {
@@ -1050,7 +1051,7 @@ function calculatePDRError(intervalsFromRoot, targetDeltas, isFree, domain, mode
     }
   }
 
-  if (initialX <= 0 || !isFinite(initialX)) {
+  if (initialX <= 0|| !isFinite(initialX)) {
     initialX = targetX;
   }
 
@@ -1078,10 +1079,10 @@ function calculatePDRError(intervalsFromRoot, targetDeltas, isFree, domain, mode
   // Run optimization
   const errorFn = buildErrorFunction();
   const optimizer = new BoundedLBFGS({
-    historySize: 10,
-    maxIterations: 1000,
-    tolerance: 1e-10,
-    barrierWeight: 1e-10
+    historySize: options.historySize || 10,
+    maxIterations: options.maxIterations || 200,
+    tolerance: options.tolerance || 1e-10,
+    barrierWeight: options.barrierWeight || 1e-10
   });
 
   let bestResult = null;
@@ -1107,7 +1108,7 @@ function calculatePDRError(intervalsFromRoot, targetDeltas, isFree, domain, mode
     }
   }
 
-  if (!bestResult || isNaN(bestResult.fx)) {
+  if (!bestResult || (!options.acceptFailure && !bestResult.success) || isNaN(bestResult.fx)) {
     return null;
   }
 
