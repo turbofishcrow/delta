@@ -1079,7 +1079,7 @@ function calculatePDRError(intervalsFromRoot, targetDeltas, isFree, domain, mode
   const errorFn = buildErrorFunction();
   const optimizer = new BoundedLBFGS({
     historySize: 10,
-    maxIterations: 200,
+    maxIterations: 1000,
     tolerance: 1e-10,
     barrierWeight: 1e-10
   });
@@ -1107,7 +1107,7 @@ function calculatePDRError(intervalsFromRoot, targetDeltas, isFree, domain, mode
     }
   }
 
-  if (!bestResult || !bestResult.success || isNaN(bestResult.fx)) {
+  if (!bestResult || isNaN(bestResult.fx)) {
     return null;
   }
 

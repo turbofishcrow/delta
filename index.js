@@ -1431,6 +1431,7 @@ const OptimizeTab = {
                   <td>p^<input type="text" class="term-input" id="${this.prefix}-chord-${this.chordCount}-p-pow-1" /> 
                     * g^<input type="text" class="term-input" id="${this.prefix}-chord-${this.chordCount}-g-pow-1" /></td>
                   <td><span class="delta-separator">+</span><input type="text" class="delta-input" id="${this.prefix}-chord-${this.chordCount}-delta-1" value="1" /></td>
+                  <td><span id="optimize-chord-${this.chordCount}-error"></span></td>
                 </tr>
               </table>
             </td>
@@ -1529,6 +1530,10 @@ const OptimizeTab = {
   },
 
   calculateGenerator() {
+    // Get the error measure
+    const domain = document.getElementById(`${this.prefix}-error-domain`).value;
+    const model = document.getElementById(`${this.prefix}-error-model`).value;
+
     const period = Math.pow(
         parseFloat(document.getElementById(`${this.prefix}-period-base`).value),
         parseFloat(document.getElementById(`${this.prefix}-period-pow`).value)
@@ -1604,6 +1609,13 @@ const OptimizeTab = {
         polynomial[freqTerms[3][1] - minPower] += freqTerms[3][0];
         const gFreqRatio = findRootConstrained(polynomial, lb, ub);
         if (gFreqRatio) {
+
+          const errorEl = document.getElementById(`optimize-chord-1-error`);
+          if (errorEl) {
+            const chordError = 0; // since this is an exact solution
+            const chordErrorDisplay = domain === "linear" ? `${chordError.toPrecision(4)}` : `${chordError.toPrecision(4)}¢`;
+            errorEl.textContent = `Least-squares error: ${chordErrorDisplay}`;
+          }
           resultsEl.innerHTML = `
               Exact solution: g = ${Math.round(Utils.ratioToCents(gFreqRatio) * 1000) / 1000}¢
           `;
@@ -1612,13 +1624,14 @@ const OptimizeTab = {
         }
       } else {
         // Exact solution doesn't exist, find least-squares error of least-squares errors
-
-        // Get the error measure
-        const domain = document.getElementById(`${this.prefix}-error-domain`).value;
-        const model = document.getElementById(`${this.prefix}-error-model`).value;
+        const leastSquaresErrors = [];
+        // bestErrorSoFar is used to keep track of the best least-squares error of least-squares errors found so far during the grid search,
+        // so that we can store the corresponding least-squares errors for each chord when we find a better solution
+        let bestErrorSoFar = Infinity;
 
         // Build the error function in g as frequency ratio
         const computeErrorForGen = (g) => {
+          const leastSquaresErrorsTemp = new Array(this.chordCount).fill(Infinity);
           let sum = 0;
 
           for (let chordIndex = 0; chordIndex < this.chordCount; chordIndex++) {
@@ -1636,12 +1649,22 @@ const OptimizeTab = {
             }
             const { targetDeltas, isFree } = this.getDeltaSignature(chordIndex);
             if (isFree.some((f) => f)) { // If some delta is free
-              sum += Math.pow(calculatePDRError(ratios, targetDeltas, isFree, domain, model).error, 2);
+              const e = calculatePDRError(ratios, targetDeltas, isFree, domain, model).error;
+              sum += e;
+              leastSquaresErrorsTemp[chordIndex] = Math.sqrt(e);
             } else { // if no delta is free
-              sum += Math.pow(calculateFDRError(ratios, targetDeltas, domain, model).error, 2);
+              const e = calculateFDRError(ratios, targetDeltas, domain, model).error;
+              sum += e;
+              leastSquaresErrorsTemp[chordIndex] = Math.sqrt(e);
             }
           }
-          return Math.sqrt(sum);
+          let finalError = sum;
+          if (finalError < bestErrorSoFar) {
+            bestErrorSoFar = finalError;
+            leastSquaresErrors.length = 0;
+            Array.prototype.push.apply(leastSquaresErrors, leastSquaresErrorsTemp);
+          }
+          return finalError;
         }
 
         // Grid search: two-stage (coarse + fine)
@@ -1680,8 +1703,19 @@ const OptimizeTab = {
         const g = bestX;
         const lsError = Math.sqrt(bestError);
         
+        // Display final least-squares error for each chord
+        for (let chordIndex = 0; chordIndex < this.chordCount; chordIndex++) {
+          const errorEl = document.getElementById(`optimize-chord-${chordIndex + 1}-error`);
+          if (errorEl) {
+            const chordError = leastSquaresErrors[chordIndex];
+            const chordErrorDisplay = domain === "linear" ? `${chordError.toPrecision(4)}` : `${chordError.toPrecision(4)}¢`;
+            errorEl.textContent = `Least-squares error: ${chordErrorDisplay}`;
+          }
+        }
+        
         const genDisplay = Utils.ratioToCents(g).toPrecision(5);
         const errorDisplay = domain === "linear" ? `${lsError.toPrecision(4)}` : `${lsError.toPrecision(4)}¢`;
+        
         resultsEl.innerHTML =
             `Optimal generator: g = ${genDisplay}¢ (least-squares error of least-squares errors: ${errorDisplay})`;
       }

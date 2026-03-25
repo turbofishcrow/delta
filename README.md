@@ -96,6 +96,30 @@ A list of all matching chords sorted by error, each displayed as:
 
 The search enumerates all possible chords (combinations of step positions) within the outer bound and computes the error for each. A progress indicator keeps the UI responsive during large searches.
 
+### Rank-2 Generator Optimization
+
+The **Optimize Rank-2** tab finds the optimal generator value for rank-2 structures for the given chords and their target delta signatures, where note frequencies are expressed as powers of a period and a generator: $f = p^a \times g^b$.
+
+**Inputs:**
+- **Period**: Expressed as `base^power` (e.g., `2^1` for an octave).
+- **Generator bounds** (cents): Lower and upper bounds for the generator value to search
+- **Chords**: Multiple chords can be defined, each with:
+  - Intervals expressed in terms of period and generator powers (e.g., `p^0 * g^1` for one generator step)
+  - **Target delta signature**: The desired delta ratios between successive intervals (e.g., `+1+1` for isodifferential spacing)
+- **Error settings**: Domain (linear/logarithmic) and error model (rooted/pairwise/all-steps), same as in other tabs
+
+**Output:**
+A solution showing:
+- The optimal generator value (in cents)
+- The error for each chord at this generator value
+- Whether an exact solution exists (when exactly one chord has exactly 2 non-free deltas)
+
+**How it works:**
+The tool searches for a generator value that makes the chord(s) approximate their target delta signatures as closely as possible. This is useful for:
+- Designing temperaments where notes follow a rank-2 pattern
+- Finding generators that make rank-2 chords sound concordant with target delta signatures
+- Exploring the trade-off between fitting multiple chords with a single generator
+
 ### Audio Playback
 
 Listen to your chords with five waveform options:
