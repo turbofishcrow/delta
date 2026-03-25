@@ -1399,36 +1399,133 @@ const ApproximateTab = {
 };
 
 const OptimizeTab = {
-  intervalCount: 1,
+  chordCount: 1,
+  intervalCounts: [1],
   prefix: 'optimize',
   
-  addInterval() {
-    this.intervalCount++;
-    const intervalTable = document.getElementById(`${this.prefix}-intervals`);
+  addChord() {
+    this.chordCount++;
+
+    const chordTable = document.getElementById(`${this.prefix}-chords`);
     const newRow = document.createElement("tr");
     newRow.innerHTML = `
-      <td>p^<input type="text" class="term-input" id="optimize-p-pow-${this.intervalCount}" /> * g^<input type="text" class="term-input" id="optimize-g-pow-${this.intervalCount}" /></td>
-      <td><span class="delta-separator">+</span><input type="text" class="delta-input" id="optimize-delta-${this.intervalCount}" value="1" /></td>
-    `;
-    intervalTable.appendChild(newRow);
+            <td>
+              <table id="optimize-chord-${this.chordCount}">
+                <tr>
+                  <th colspan="3">Chord ${this.chordCount}</th>
+                </tr>
+                <tr>
+                  <th>#</th>
+                  <th>Frequency (from root)</th>
+                  <th>Delta (from previous)</th>
+                  <td>
+                    <div class="button-group">
+                      <button id="${this.prefix}-btn-add-interval-${this.chordCount}">Add interval</button>
+                      <button id="${this.prefix}-btn-remove-interval-${this.chordCount}">Remove last</button>
+                      <button id="${this.prefix}-btn-clear-${this.chordCount}">Keep 1st only</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <th>1</th>
+                  <td>p^<input type="text" class="term-input" id="${this.prefix}-chord-${this.chordCount}-p-pow-1" /> 
+                    * g^<input type="text" class="term-input" id="${this.prefix}-chord-${this.chordCount}-g-pow-1" /></td>
+                  <td><span class="delta-separator">+</span><input type="text" class="delta-input" id="${this.prefix}-chord-${this.chordCount}-delta-1" value="1" /></td>
+                </tr>
+              </table>
+            </td>
+              `;
+    chordTable.appendChild(newRow);
+    this.intervalCounts.push(1);
+
+    // Add event listeners to interval buttons
+
+    // IMPORTANT: 
+    // need this so that the argument going into the button event listeners would always refer to this chord
+    // (`this.chordCount` changes when chord count changes so it shouldn't be used as argument for listeners)
+    const newChordCount = this.chordCount;
+
+    const addIntervalButton = document.getElementById(`${this.prefix}-btn-add-interval-${this.chordCount}`);
+    addIntervalButton.addEventListener("click", () => this.addInterval(newChordCount - 1));
+    const removeIntervalButton = document.getElementById(`${this.prefix}-btn-remove-interval-${this.chordCount}`);
+    removeIntervalButton.addEventListener("click", () => this.removeInterval(newChordCount - 1));
+    const clearIntervalsButton = document.getElementById(`${this.prefix}-btn-clear-${this.chordCount}`);
+    clearIntervalsButton.addEventListener("click", () => this.clearIntervals(newChordCount - 1));
   },
 
-  removeInterval() {
-    const intervalTable = document.getElementById(`${this.prefix}-intervals`);
-    if (this.intervalCount > 1) {
-      intervalTable.removeChild(intervalTable.lastElementChild);
-      this.intervalCount--;
+  removeChord() {
+    const chordTable = document.getElementById(`${this.prefix}-chords`);
+    if (this.chordCount > 1) {
+      chordTable.removeChild(chordTable.lastElementChild);
+      this.chordCount--;
+      this.intervalCounts.pop();
       // this.refreshIfPlaying();
     }
   },
 
-  clearIntervals() {
-    const intervalTable = document.getElementById(`${this.prefix}-intervals`);
-    while (this.intervalCount > 1) {
-      intervalTable.removeChild(intervalTable.lastElementChild);
-      this.intervalCount--;
+  clearChords() {
+    const chordTable = document.getElementById(`${this.prefix}-chords`);
+    while (this.chordCount > 1) {
+      chordTable.removeChild(chordTable.lastElementChild);
+      this.chordCount--;
+      this.intervalCounts.pop();
     }
     // this.refreshIfPlaying();
+  },
+
+  addInterval(chordIndex) {
+    this.intervalCounts[chordIndex]++;
+
+    const intervalTable = document.getElementById(`${this.prefix}-chord-${chordIndex + 1}`);
+    const newRow = document.createElement("tr");
+    newRow.innerHTML = `
+      <th>${this.intervalCounts[chordIndex]}</th>
+      <td>p^<input type="text" class="term-input" id="optimize-chord-${chordIndex + 1}-p-pow-${this.intervalCounts[chordIndex]}" /> 
+      * g^<input type="text" class="term-input" id="optimize-chord-${chordIndex + 1}-g-pow-${this.intervalCounts[chordIndex]}" /></td>
+      <td><span class="delta-separator">+</span><input type="text" class="delta-input" id="optimize-chord-${chordIndex + 1}-delta-${this.intervalCounts[chordIndex]}" value="1" /></td>
+    `;
+    intervalTable.appendChild(newRow);
+  },
+
+  removeInterval(chordIndex) {
+    const intervalTable = document.getElementById(`${this.prefix}-chord-${chordIndex + 1}`);
+    if (this.intervalCounts[chordIndex] > 1) {
+      intervalTable.removeChild(intervalTable.lastElementChild);
+      this.intervalCounts[chordIndex]--;
+      // this.refreshIfPlaying();
+    }
+  },
+
+  clearIntervals(chordIndex) {
+    const intervalTable = document.getElementById(`${this.prefix}-chord-${chordIndex + 1}`);
+    while (this.intervalCounts[chordIndex] > 1) {
+      intervalTable.removeChild(intervalTable.lastElementChild);
+      this.intervalCounts[chordIndex]--;
+    }
+    // this.refreshIfPlaying();
+  },
+
+  getDeltaSignature(chordIndex) {
+    const targetDeltas = [];
+    const isFree = [];
+    for (let i = 1; i <= this.intervalCounts[chordIndex]; i++) {
+      const input = document.getElementById(`${this.prefix}-chord-${chordIndex + 1}-delta-${i}`);
+      if (!input) continue;
+      const val = input.value.trim();
+      if (val === "?") {
+        targetDeltas.push(1);
+        isFree.push(true);
+      } else {
+        const num = parseFloat(val);
+        if (isNaN(num) || num <= 0) {
+          alert(`Delta ${i}: must be a positive number or "?".`);
+          return null;
+        }
+        targetDeltas.push(num);
+        isFree.push(false);
+      }
+    }
+    return { targetDeltas, isFree };
   },
 
   calculateGenerator() {
@@ -1436,85 +1533,171 @@ const OptimizeTab = {
         parseFloat(document.getElementById(`${this.prefix}-period-base`).value),
         parseFloat(document.getElementById(`${this.prefix}-period-pow`).value)
     );
-    // Get non-free deltas
-    let nonFreeDeltas = [];
-    let i = 0;
-    while (i < this.intervalCount) {
-      const currentDelta = parseFloat(document.getElementById(`${this.prefix}-delta-${i + 1}`).value);
-      if (currentDelta && isFinite(currentDelta)) {
-        nonFreeDeltas.push(currentDelta);
-      }
-      i++;
-    }
-    const resultsEl = document.getElementById(`${this.prefix}-results`);
-    const freqTerms = [];
-    if (nonFreeDeltas.length === 2) {
-      i = 0;
-      let iNonFreeDeltas = 0; // number of non-free deltas seen
-      while (iNonFreeDeltas < 2) {
-        const currentDelta = parseFloat(document.getElementById(`${this.prefix}-delta-${i + 1}`).value);
-        if (currentDelta && isFinite(currentDelta)) { // if current delta is not free
-          iNonFreeDeltas++;
-          // [c, i] represents c*g^i
-          // currFrequencyTerm is cumulative
-          const currFrequencyTerm = [
-              Math.pow(period, parseFloat(document.getElementById(`${this.prefix}-p-pow-${i + 1}`).value)),
-              parseInt(document.getElementById(`${this.prefix}-g-pow-${i + 1}`).value),
-          ];
-          const prevFrequencyTerm = i === 0 ? [1, 0] : [
-              Math.pow(period, parseFloat(document.getElementById(`${this.prefix}-p-pow-${i}`).value)),
-              parseInt(document.getElementById(`${this.prefix}-g-pow-${i}`).value),
-          ];
-          freqTerms.push(prevFrequencyTerm);
-          freqTerms.push(currFrequencyTerm);
-        }
-        i++;
-      }
-      const minPower = Math.min(
-          freqTerms[0][1],
-          freqTerms[1][1],
-          freqTerms[2][1],
-          freqTerms[3][1],
-      );
-      const maxPower = Math.max(
-          freqTerms[0][1],
-          freqTerms[1][1],
-          freqTerms[2][1],
-          freqTerms[3][1],
-      );
-      const deltaRatio = nonFreeDeltas[1] / nonFreeDeltas[0];
-      const polynomial = new Array(maxPower - minPower + 1).fill(0); // e.g. maxPower = 3, minPower = -3 => {-3, ..., 3} has 7 elements
-      
-      // (freqTerms[3] - freqTerms[2]) / (freqTerms[1] - freqTerms[0]) == nonFreeDeltas[1] / nonFreeDeltas[0] == deltaRatio
-      // => freqTerms[3] - freqTerms[2] == deltaRatio * freqTerms[1] - deltaRatio * freqTerms[0]
-      // => freqTerms[3] - freqTerms[2] - deltaRatio * freqTerms[1] + deltaRatio * freqTerms[0] == 0
-      // Now divide by the minimum power of g to get the polynomial to solve
+    const lbInput = parseFloat(document.getElementById(`${this.prefix}-lower-bound`).value);
+    const lb = isFinite(lbInput) ? Math.pow(2, lbInput / 1200) : 1;
+    const ubInput = parseFloat(document.getElementById(`${this.prefix}-upper-bound`).value);
+    const ub = isFinite(ubInput) ? Math.pow(2, ubInput / 1200) : period;
 
-      // Use += to combine any like terms
-      polynomial[freqTerms[0][1] - minPower] += deltaRatio * freqTerms[0][0];
-      polynomial[freqTerms[1][1] - minPower] += -deltaRatio * freqTerms[1][0];
-      polynomial[freqTerms[2][1] - minPower] += -freqTerms[2][0];
-      polynomial[freqTerms[3][1] - minPower] += freqTerms[3][0];
-      const lbInput = parseFloat(document.getElementById(`${this.prefix}-lower-bound`).value);
-      const lb = isFinite(lbInput) ? Math.pow(2, lbInput / 1200) : 1;
-      const ubInput = parseFloat(document.getElementById(`${this.prefix}-upper-bound`).value);
-      const ub = isFinite(ubInput) ? Math.pow(2, ubInput / 1200) : period;
-      const gFreqRatio = findRootConstrained(polynomial, lb, ub);
-      if (gFreqRatio) {
-        resultsEl.innerHTML = `
-            Optimal generator g = ${Math.round(Utils.ratioToCents(gFreqRatio) * 1000) / 1000}¢
-        `;
+    // Get non-free deltas of every chord
+    let nonFreeDeltasLists = new Array(this.chordCount);
+    for (let i = 0; i < this.chordCount; i++) {
+      nonFreeDeltasLists[i] = [];
+      for (let j = 0; j < this.intervalCounts[i]; j++) {
+        const currentDelta = parseFloat(document.getElementById(`${this.prefix}-chord-${i + 1}-delta-${j + 1}`).value);
+        if (currentDelta && isFinite(currentDelta) && currentDelta > 0) {
+          nonFreeDeltasLists[i].push(currentDelta);
+        }
+      }
+    }
+
+    const resultsEl = document.getElementById(`${this.prefix}-results`);
+    if (nonFreeDeltasLists.every((list) => list.length >= 2)) {
+      if (this.chordCount == 1 && nonFreeDeltasLists[0].length == 2) {
+        // There exists an exact solution, find it with Brent's method
+        const freqTerms = [];
+
+        i = 0;
+        let iNonFreeDeltas = 0; // number of non-free deltas seen
+        while (iNonFreeDeltas < 2) {
+          const currentDelta = parseFloat(document.getElementById(`${this.prefix}-chord-1-delta-${i + 1}`).value);
+          if (currentDelta && isFinite(currentDelta)) { // if current delta is not free
+            iNonFreeDeltas++;
+            // [c, i] represents c*g^i
+            // currFrequencyTerm is cumulative
+            const currFrequencyTerm = [
+                Math.pow(period, parseFloat(document.getElementById(`${this.prefix}-chord-1-p-pow-${i + 1}`).value)),
+                parseInt(document.getElementById(`${this.prefix}-chord-1-g-pow-${i + 1}`).value),
+            ];
+            const prevFrequencyTerm = i === 0 ? [1, 0] : [
+                Math.pow(period, parseFloat(document.getElementById(`${this.prefix}-chord-1-p-pow-${i}`).value)),
+                parseInt(document.getElementById(`${this.prefix}-chord-1-g-pow-${i}`).value),
+            ];
+            freqTerms.push(prevFrequencyTerm);
+            freqTerms.push(currFrequencyTerm);
+          }
+          i++;
+        }
+        const minPower = Math.min(
+            freqTerms[0][1],
+            freqTerms[1][1],
+            freqTerms[2][1],
+            freqTerms[3][1],
+        );
+        const maxPower = Math.max(
+            freqTerms[0][1],
+            freqTerms[1][1],
+            freqTerms[2][1],
+            freqTerms[3][1],
+        );
+        const deltaRatio = nonFreeDeltasLists[0][1] / nonFreeDeltasLists[0][0];
+        const polynomial = new Array(maxPower - minPower + 1).fill(0); // e.g. maxPower = 3, minPower = -3 => {-3, ..., 3} has 7 elements
+        
+        // (freqTerms[3] - freqTerms[2]) / (freqTerms[1] - freqTerms[0]) == nonFreeDeltas[1] / nonFreeDeltas[0] == deltaRatio
+        // => freqTerms[3] - freqTerms[2] == deltaRatio * freqTerms[1] - deltaRatio * freqTerms[0]
+        // => freqTerms[3] - freqTerms[2] - deltaRatio * freqTerms[1] + deltaRatio * freqTerms[0] == 0
+        // Now divide by the minimum power of g to get the polynomial to solve
+
+        // Use += to combine any like terms
+        polynomial[freqTerms[0][1] - minPower] += deltaRatio * freqTerms[0][0];
+        polynomial[freqTerms[1][1] - minPower] += -deltaRatio * freqTerms[1][0];
+        polynomial[freqTerms[2][1] - minPower] += -freqTerms[2][0];
+        polynomial[freqTerms[3][1] - minPower] += freqTerms[3][0];
+        const gFreqRatio = findRootConstrained(polynomial, lb, ub);
+        if (gFreqRatio) {
+          resultsEl.innerHTML = `
+              Exact solution: g = ${Math.round(Utils.ratioToCents(gFreqRatio) * 1000) / 1000}¢
+          `;
+        } else {
+          resultsEl.innerHTML = "Could not find unique generator with error 0. Try adjusting the range.";
+        }
       } else {
-        resultsEl.innerHTML = "Could not find unique generator with error 0";
+        // Exact solution doesn't exist, find least-squares error of least-squares errors
+
+        // Get the error measure
+        const domain = document.getElementById(`${this.prefix}-error-domain`).value;
+        const model = document.getElementById(`${this.prefix}-error-model`).value;
+
+        // Build the error function in g as frequency ratio
+        const computeErrorForGen = (g) => {
+          let sum = 0;
+
+          for (let chordIndex = 0; chordIndex < this.chordCount; chordIndex++) {
+            // Get ratios from root
+            const ratios = [];
+            for (let i = 0; i < this.intervalCounts[chordIndex]; i++) {
+              ratios.push(
+                  Math.pow(period, parseInt(
+                      document.getElementById(`${this.prefix}-chord-${chordIndex + 1}-p-pow-${i + 1}`).value)
+                  )
+                  * Math.pow(g, parseInt(
+                      document.getElementById(`${this.prefix}-chord-${chordIndex + 1}-g-pow-${i + 1}`).value)
+                  )
+              );
+            }
+            const { targetDeltas, isFree } = this.getDeltaSignature(chordIndex);
+            if (isFree.some((f) => f)) { // If some delta is free
+              sum += Math.pow(calculatePDRError(ratios, targetDeltas, isFree, domain, model).error, 2);
+            } else { // if no delta is free
+              sum += Math.pow(calculateFDRError(ratios, targetDeltas, domain, model).error, 2);
+            }
+          }
+          return Math.sqrt(sum);
+        }
+
+        // Grid search: two-stage (coarse + fine)
+        // lb and ub are already in frequency ratios
+        let xMin = lb;
+        let xMax = ub;
+
+        let bestX = xMin;
+        let bestError = computeErrorForGen(xMin);
+        const coarseStep = .001;
+        const coarseSteps = Math.floor((xMax - xMin) / coarseStep);
+
+        for (let i = 0; i <= coarseSteps; i++) {
+          const testX = xMin + i * coarseStep;
+          const error = computeErrorForGen(testX);
+          if (error < bestError) {
+            bestError = error;
+            bestX = testX;
+          }
+        }
+
+        xMin = bestX - coarseStep;
+        xMax = bestX + coarseStep;
+        const fineSteps = 1000;
+        const fineStep = (xMax - xMin) / fineSteps;
+
+        for (let i = 0; i <= fineSteps; i++) {
+          const testX = xMin + i * fineStep;
+          const error = computeErrorForGen(testX);
+          if (error < bestError) {
+            bestError = error;
+            bestX = testX;
+          }
+        }
+
+        const g = bestX;
+        const lsError = Math.sqrt(bestError);
+        
+        const genDisplay = Utils.ratioToCents(g).toPrecision(5);
+        const errorDisplay = domain === "linear" ? `${lsError.toPrecision(4)}` : `${lsError.toPrecision(4)}¢`;
+        resultsEl.innerHTML =
+            `Optimal generator: g = ${genDisplay}¢ (least-squares error of least-squares errors: ${errorDisplay})`;
       }
     } else {
-      resultsEl.innerHTML = "Need exactly 2 non-free (numeric, not blank) deltas";
+      resultsEl.innerHTML = "Every chord should have at least 2 non-free (positive number) deltas.";
     }
   },
   init() {
-    document.getElementById(`${this.prefix}-btn-add-interval`).addEventListener("click", () => this.addInterval());
-    document.getElementById(`${this.prefix}-btn-remove-interval`).addEventListener("click", () => this.removeInterval());
-    document.getElementById(`${this.prefix}-btn-clear`).addEventListener("click", () => this.clearIntervals());
+    document.getElementById(`${this.prefix}-btn-add-chord`).addEventListener("click", () => this.addChord());
+    document.getElementById(`${this.prefix}-btn-remove-chord`).addEventListener("click", () => this.removeChord());
+    document.getElementById(`${this.prefix}-btn-clear-chords`).addEventListener("click", () => this.clearChords());
+    
+    document.getElementById(`${this.prefix}-btn-add-interval-1`).addEventListener("click", () => this.addInterval(0));
+    document.getElementById(`${this.prefix}-btn-remove-interval-1`).addEventListener("click", () => this.removeInterval(0));
+    document.getElementById(`${this.prefix}-btn-clear-1`).addEventListener("click", () => this.clearIntervals(0));
+    
     document.getElementById(`${this.prefix}-btn-calculate`).addEventListener("click", () => this.calculateGenerator());
   }
 };

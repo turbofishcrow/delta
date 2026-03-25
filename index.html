@@ -376,7 +376,7 @@
             />
           <hr/>
           <label for="optimize-lower-bound"
-            ><strong>Gen. lower bound</strong> (in cents, default = 1/1)</label
+            ><strong>Generator lower bound</strong> (cents, default = 1/1)</label
           >
           <input
             type="number"
@@ -386,7 +386,7 @@
           />
           <br/>
           <label for="optimize-upper-bound"
-            ><strong>Gen. upper bound</strong> (in cents, default = period)</label
+            ><strong>Generator upper bound</strong> (cents, default = period)</label
           >
 
           <input
@@ -398,24 +398,56 @@
 
           <hr/>
 
-          <strong>Chord and target delta signature (need exactly 2 non-free deltas for exact solution)</strong>
-
-          <div class="button-group">
-            <button id="optimize-btn-add-interval">Add</button>
-            <button id="optimize-btn-remove-interval">Remove last</button>
-            <button id="optimize-btn-clear">Keep first only</button>
+          <strong>Chord and target delta signature (need 1 chord with exactly 2 non-free deltas for exact solution)</strong>
+          <div>
+            <button id="optimize-btn-add-chord">Add chord</button>
+            <button id="optimize-btn-remove-chord">Remove last</button>
+            <button id="optimize-btn-clear-chords">Keep 1st only</button>
           </div>
-
-          <table id="optimize-intervals">
+          <table id="optimize-chords">
             <tr>
-              <th>Frequency (from root)</th>
-              <th>Delta (from previous)</th>
-            </tr>
-            <tr>
-              <td>p^<input type="text" class="term-input" id="optimize-p-pow-1" /> * g^<input type="text" class="term-input" id="optimize-g-pow-1" /></td>
-              <td><span class="delta-separator">+</span><input type="text" class="delta-input" id="optimize-delta-1" value="1" /></td>
+              <td>
+                <table id="optimize-chord-1">
+                  <tr>
+                    <th colspan="3">Chord 1</th>
+                  </tr>
+                  <tr>
+                    <th>#</th>
+                    <th>Frequency (from root)</th>
+                    <th>Delta (from previous)</th>
+                    <td>
+                      <div class="button-group">
+                        <button id="optimize-btn-add-interval-1">Add interval</button>
+                        <button id="optimize-btn-remove-interval-1">Remove last</button>
+                        <button id="optimize-btn-clear-1">Keep 1st only</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>1</th>
+                    <td>p^<input type="text" class="term-input" id="optimize-chord-1-p-pow-1" /> 
+                      * g^<input type="text" class="term-input" id="optimize-chord-1-g-pow-1" /></td>
+                    <td><span class="delta-separator">+</span><input type="text" class="delta-input" id="optimize-chord-1-delta-1" value="1" /></td>
+                  </tr>
+                </table>
+              </td>
             </tr>
           </table>
+          <hr/>
+          <strong>Error settings</strong>
+          <div style="margin: 6px 0;">
+            <label for="optimize-error-domain">Domain:</label>
+            <select id="optimize-error-domain">
+              <option value="linear">Linear</option>
+              <option value="log" selected>Logarithmic (cents)</option>
+            </select>
+            <label for="optimize-error-model" style="margin-left: 10px;">Error model:</label>
+            <select id="optimize-error-model">
+              <option value="rooted">Rooted (from root)</option>
+              <option value="pairwise" selected>Pairwise (all intervals)</option>
+              <option value="all-steps">All-steps (successive only)</option>
+            </select>
+          </div>
           <hr/>
           <button type="button" id="optimize-btn-calculate">Calculate generator</button>
           <div id="optimize-results"></div>
