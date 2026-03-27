@@ -1145,6 +1145,7 @@ function calculatePDRError(intervalsFromRoot, targetDeltas, isFree, domain, mode
     error: finalError,
     x: unscaledX,
     freeValues: unscaledFreeVals,
+    targetRatios: [1].concat(includedRatios),
     // Include preprocessing info for visualization
     firstIncludedInterval: processed.firstIncludedInterval,
     lastIncludedInterval: processed.lastIncludedInterval,

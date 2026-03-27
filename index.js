@@ -12,6 +12,11 @@ const AppState = {
 // ============ Shared Utilities ============
 
 const Utils = {
+  // Helper function for sums.
+  sum(numbers) {
+    return numbers.reduce((accumulator, currentValue) => accumulator + currentValue, 0);
+  },
+
   parseCents(input) {
     if (typeof input !== "string") {
       return parseFloat(input);
@@ -1402,8 +1407,17 @@ const OptimizeTab = {
   chordCount: 1,
   intervalCounts: [1],
   prefix: 'optimize',
-  
+  periodGenPowerPairsLists: [], // store pairs of (period power, generator power) for each interval in each chord
+  targetChords: [], // store target chords for playback
+  generator: null, // when calculateGenerator() is called, store the generator (as ratio) to compute chords for playback
+  period: null, // store the period for playback
+  playingChordIndex: null, // track which chord is currently playing (if any) to allow stopping when switching chords or updating intervals
+  playingTarget: false, // track whether currently playing the actual chord or the target chord, to allow stopping when switching or updating intervals
+
+  // Chords can only be played when `this.generator` is set, which only happens after calculateGenerator() is called.
+
   addChord() {
+    this.stopAudioIfPlaying();
     this.chordCount++;
 
     const chordTable = document.getElementById(`${this.prefix}-chords`);
@@ -1412,12 +1426,16 @@ const OptimizeTab = {
             <td>
               <table id="optimize-chord-${this.chordCount}">
                 <tr>
-                  <th colspan="3">Chord ${this.chordCount}</th>
+                  <th colspan="2">Chord ${this.chordCount}</th>
+                  <td>
+                    <button class="approx-play-btn" id="optimize-btn-play-${this.chordCount}">&#9654;</button>
+                    <button class="approx-play-target-btn" id="optimize-btn-play-target-${this.chordCount}">&#9654; Target</button>
+                  </td>
                 </tr>
                 <tr>
                   <th>#</th>
                   <th>Frequency (from root)</th>
-                  <th>Delta (from previous)</th>
+                  <th>Target delta</th>
                   <td>
                     <div class="button-group">
                       <button id="${this.prefix}-btn-add-interval-${this.chordCount}">Add interval</button>
@@ -1452,15 +1470,21 @@ const OptimizeTab = {
     removeIntervalButton.addEventListener("click", () => this.removeInterval(newChordCount - 1));
     const clearIntervalsButton = document.getElementById(`${this.prefix}-btn-clear-${this.chordCount}`);
     clearIntervalsButton.addEventListener("click", () => this.clearIntervals(newChordCount - 1));
+
+    const playButton = document.getElementById(`optimize-btn-play-${this.chordCount}`);
+    playButton.addEventListener("click", () => this.playChord(newChordCount - 1));
+    const playTargetButton = document.getElementById(`optimize-btn-play-target-${this.chordCount}`);
+    playTargetButton.addEventListener("click", () => this.playTarget(newChordCount - 1));
+
   },
 
   removeChord() {
     const chordTable = document.getElementById(`${this.prefix}-chords`);
     if (this.chordCount > 1) {
+      this.stopAudioIfPlaying();
       chordTable.removeChild(chordTable.lastElementChild);
       this.chordCount--;
       this.intervalCounts.pop();
-      // this.refreshIfPlaying();
     }
   },
 
@@ -1470,11 +1494,12 @@ const OptimizeTab = {
       chordTable.removeChild(chordTable.lastElementChild);
       this.chordCount--;
       this.intervalCounts.pop();
+      this.stopAudioIfPlaying();
     }
-    // this.refreshIfPlaying();
   },
 
   addInterval(chordIndex) {
+    this.stopAudioIfPlaying();
     this.intervalCounts[chordIndex]++;
 
     const intervalTable = document.getElementById(`${this.prefix}-chord-${chordIndex + 1}`);
@@ -1491,19 +1516,19 @@ const OptimizeTab = {
   removeInterval(chordIndex) {
     const intervalTable = document.getElementById(`${this.prefix}-chord-${chordIndex + 1}`);
     if (this.intervalCounts[chordIndex] > 1) {
+      this.stopAudioIfPlaying();
       intervalTable.removeChild(intervalTable.lastElementChild);
       this.intervalCounts[chordIndex]--;
-      // this.refreshIfPlaying();
     }
   },
 
   clearIntervals(chordIndex) {
     const intervalTable = document.getElementById(`${this.prefix}-chord-${chordIndex + 1}`);
     while (this.intervalCounts[chordIndex] > 1) {
+      this.stopAudioIfPlaying();
       intervalTable.removeChild(intervalTable.lastElementChild);
       this.intervalCounts[chordIndex]--;
     }
-    // this.refreshIfPlaying();
   },
 
   getDeltaSignature(chordIndex) {
@@ -1530,18 +1555,35 @@ const OptimizeTab = {
   },
 
   calculateGenerator() {
+    this.stopAudioIfPlaying();
     // Get the error measure
     const domain = document.getElementById(`${this.prefix}-error-domain`).value;
     const model = document.getElementById(`${this.prefix}-error-model`).value;
 
-    const period = Math.pow(
+    this.period = Math.pow(
         parseFloat(document.getElementById(`${this.prefix}-period-base`).value),
         parseFloat(document.getElementById(`${this.prefix}-period-pow`).value)
     );
     const lbInput = parseFloat(document.getElementById(`${this.prefix}-lower-bound`).value);
     const lb = isFinite(lbInput) ? Math.pow(2, lbInput / 1200) : 1;
     const ubInput = parseFloat(document.getElementById(`${this.prefix}-upper-bound`).value);
-    const ub = isFinite(ubInput) ? Math.pow(2, ubInput / 1200) : period;
+    const ub = isFinite(ubInput) ? Math.pow(2, ubInput / 1200) : this.period;
+
+    // Store all chords for playback
+    for (let i = 0; i < this.chordCount; i++) {
+      for (let j = 0; j < this.intervalCounts[i]; j++) {
+        const pPowInput = document.getElementById(`${this.prefix}-chord-${i + 1}-p-pow-${j + 1}`);
+        const gPowInput = document.getElementById(`${this.prefix}-chord-${i + 1}-g-pow-${j + 1}`);
+        const pPow = parseFloat(pPowInput.value);
+        const gPow = parseFloat(gPowInput.value);
+        if (isNaN(pPow) || isNaN(gPow)) {
+          alert(`Interval ${j + 1} of chord ${i + 1}: period and generator powers must be numbers.`);
+          return;
+        }
+        this.periodGenPowerPairsLists[i] = this.periodGenPowerPairsLists[i] || [];
+        this.periodGenPowerPairsLists[i][j] = [pPow, gPow];
+      }
+    }
 
     // Get non-free deltas of every chord
     let nonFreeDeltasLists = new Array(this.chordCount);
@@ -1570,11 +1612,11 @@ const OptimizeTab = {
             // [c, i] represents c*g^i
             // currFrequencyTerm is cumulative
             const currFrequencyTerm = [
-                Math.pow(period, parseFloat(document.getElementById(`${this.prefix}-chord-1-p-pow-${i + 1}`).value)),
+                Math.pow(this.period, parseFloat(document.getElementById(`${this.prefix}-chord-1-p-pow-${i + 1}`).value)),
                 parseInt(document.getElementById(`${this.prefix}-chord-1-g-pow-${i + 1}`).value),
             ];
             const prevFrequencyTerm = i === 0 ? [1, 0] : [
-                Math.pow(period, parseFloat(document.getElementById(`${this.prefix}-chord-1-p-pow-${i}`).value)),
+                Math.pow(this.period, parseFloat(document.getElementById(`${this.prefix}-chord-1-p-pow-${i}`).value)),
                 parseInt(document.getElementById(`${this.prefix}-chord-1-g-pow-${i}`).value),
             ];
             freqTerms.push(prevFrequencyTerm);
@@ -1609,13 +1651,14 @@ const OptimizeTab = {
         polynomial[freqTerms[3][1] - minPower] += freqTerms[3][0];
         const gFreqRatio = findRootConstrained(polynomial, lb, ub);
         if (gFreqRatio) {
-
+          this.generator = gFreqRatio; // Store the generator for playback
           const errorEl = document.getElementById(`optimize-chord-1-error`);
           if (errorEl) {
             const chordError = 0; // since this is an exact solution
             const chordErrorDisplay = domain === "linear" ? `${chordError.toPrecision(4)}` : `${chordError.toPrecision(4)}¢`;
             errorEl.textContent = `Least-squares error: ${chordErrorDisplay}`;
           }
+          this.targetChords[0] = this.getChordFrequencies(0);
           resultsEl.innerHTML = `
               Exact solution: g = ${Math.round(Utils.ratioToCents(gFreqRatio) * 1000) / 1000}¢
           `;
@@ -1632,6 +1675,7 @@ const OptimizeTab = {
         // Build the error function in g as frequency ratio
         const computeErrorForGen = (g) => {
           const leastSquaresErrorsTemp = new Array(this.chordCount).fill(Infinity);
+          const targetChordsTemp = new Array(this.chordCount).fill(null);
           let sum = 0;
 
           for (let chordIndex = 0; chordIndex < this.chordCount; chordIndex++) {
@@ -1639,7 +1683,7 @@ const OptimizeTab = {
             const ratios = [];
             for (let i = 0; i < this.intervalCounts[chordIndex]; i++) {
               ratios.push(
-                  Math.pow(period, parseInt(
+                  Math.pow(this.period, parseInt(
                       document.getElementById(`${this.prefix}-chord-${chordIndex + 1}-p-pow-${i + 1}`).value)
                   )
                   * Math.pow(g, parseInt(
@@ -1649,11 +1693,22 @@ const OptimizeTab = {
             }
             const { targetDeltas, isFree } = this.getDeltaSignature(chordIndex);
             if (isFree.some((f) => f)) { // If some delta is free
-              const e = calculatePDRError(ratios, targetDeltas, isFree, domain, model, {maxIterations: 10000, tolerance: 1e-7}).error; // This has the square root so square it before summing
+              const errorResult = calculatePDRError(ratios, targetDeltas, isFree, domain, model, {maxIterations: 10000, tolerance: 1e-7}); // This has the square root so square it before summing
+              const e = errorResult.error;
+              targetChordsTemp[chordIndex] = errorResult.targetRatios;
               sum += e * e;
               leastSquaresErrorsTemp[chordIndex] = e;
             } else { // if no delta is free
-              const e = calculateFDRError(ratios, targetDeltas, domain, model).error; // This has the square root so square it before summing
+              const errorResult = calculateFDRError(ratios, targetDeltas, domain, model); // This has the square root so square it before summing
+              const e = errorResult.error;
+              // get target chord from x and target deltas
+              const x = errorResult.x;
+              targetChordsTemp[chordIndex] = [1]; // start with root
+              const deltaSig = this.getDeltaSignature(chordIndex).targetDeltas;
+              for (let i = 0; i < this.intervalCounts[chordIndex]; i++) {
+                const cumulativeDelta = Utils.sum(deltaSig.slice(0, i + 1));
+                targetChordsTemp[chordIndex].push((x + cumulativeDelta) / x);
+              }
               sum += e * e;
               leastSquaresErrorsTemp[chordIndex] = e;
             }
@@ -1664,25 +1719,29 @@ const OptimizeTab = {
             leastSquaresErrors.length = 0;
             Array.prototype.push.apply(leastSquaresErrors, leastSquaresErrorsTemp);
           }
-          return finalError;
+
+          return { error: finalError, targets: targetChordsTemp };
         }
 
-        // Grid search: two-stage (coarse + fine)
+        // Grid search over generator values: two-stage (coarse + fine)
         // lb and ub are already in frequency ratios
         let xMin = lb;
         let xMax = ub;
 
         let bestX = xMin;
-        let bestError = computeErrorForGen(xMin);
+        const errorResult = computeErrorForGen(xMin);
+        let bestError = errorResult.error;
+        this.targetChords = errorResult.targets; // Store the target chords for playback, corresponding to the best generator found so far
         const coarseStep = .001;
         const coarseSteps = Math.floor((xMax - xMin) / coarseStep);
 
         for (let i = 0; i <= coarseSteps; i++) {
           const testX = xMin + i * coarseStep;
-          const error = computeErrorForGen(testX);
-          if (error < bestError) {
-            bestError = error;
+          const newErrorResult = computeErrorForGen(testX);
+          if (newErrorResult.error < bestError) {
+            bestError = newErrorResult.error;
             bestX = testX;
+            this.targetChords = newErrorResult.targets;
           }
         }
 
@@ -1693,14 +1752,16 @@ const OptimizeTab = {
 
         for (let i = 0; i <= fineSteps; i++) {
           const testX = xMin + i * fineStep;
-          const error = computeErrorForGen(testX);
-          if (error < bestError) {
-            bestError = error;
+          const newErrorResult = computeErrorForGen(testX);
+          if (newErrorResult.error < bestError) {
+            bestError = newErrorResult.error;
             bestX = testX;
+            this.targetChords = newErrorResult.targets;
           }
         }
 
         const g = bestX;
+        this.generator = g; // Store the loaded generator for playback
         // bestError is sum of squares so take the sqrt to get the least-squares error of least-squares errors
         const lsError = Math.sqrt(bestError);
         
@@ -1724,7 +1785,75 @@ const OptimizeTab = {
       resultsEl.innerHTML = "Every chord should have at least 2 non-free (positive number) deltas.";
     }
   },
+
+  getBaseFrequency() {
+    const freq = parseFloat(document.getElementById(`${this.prefix}-base-frequency`).value);
+    if (isNaN(freq) || freq <= 0) return AppState.DEFAULT_PITCH_STANDARD;
+    return freq;
+  },
+
+  getChordFrequencies(index) {
+    if (!this.generator || !this.period) return null;
+    const relativeFreqs = [1]; // Start with the root
+    const pairs = this.periodGenPowerPairsLists[index];
+    if (!pairs) return null;
+    for (const [pPow, gPow] of pairs) {
+      relativeFreqs.push(Math.pow(this.period, pPow) * Math.pow(this.generator, gPow));
+    }
+    return relativeFreqs;
+  },
+
+  playChord(index) {
+    this.playingChordIndex = index; // Update currently playing chord index
+    this.playingTarget = false; // Indicate that we're playing the actual chord, not the target
+    if (this.generator) {
+      const baseFreq = this.getBaseFrequency();
+      const rs = this.getChordFrequencies(index);
+      if (!rs) return;
+      const frequencies = rs.map(r => baseFreq * r);
+      Audio.playFrequencies(frequencies);
+      AppState.isPlaying = true;
+    }
+  },
+
+  playTarget(index) {
+    this.playingChordIndex = index; // Update currently playing chord index
+    this.playingTarget = true; // Indicate that we're playing the target chord, not the actual chord
+    if (this.generator) {
+      const baseFreq = this.getBaseFrequency();
+      const rs = this.targetChords[index];
+      if (!rs) return;
+      const frequencies = rs.map(r => baseFreq * r);
+      Audio.playFrequencies(frequencies);
+      AppState.isPlaying = true;
+    }
+  },
+
+  stopAudioIfPlaying() {
+    if (AppState.isPlaying) {
+      Audio.stop();
+      AppState.isPlaying = false;
+    }
+  },
+
+  play() {
+    if (this.playingChordIndex === null) return;
+    if (this.playingTarget) {
+      this.playTarget(this.playingChordIndex);
+    } else {
+      this.playChord(this.playingChordIndex);
+    }
+  },
+
   init() {
+    document.getElementById(`${this.prefix}-btn-stop`).addEventListener("click", () => Audio.stop());
+    document.getElementById(`${this.prefix}-waveform`).addEventListener("change", (e) => {
+      Audio.setWaveform(e.target.value, this.prefix);
+      if (AppState.isPlaying && AppState.activeTab === this.prefix) {
+        this.play();
+      }
+    });
+
     document.getElementById(`${this.prefix}-btn-add-chord`).addEventListener("click", () => this.addChord());
     document.getElementById(`${this.prefix}-btn-remove-chord`).addEventListener("click", () => this.removeChord());
     document.getElementById(`${this.prefix}-btn-clear-chords`).addEventListener("click", () => this.clearChords());
@@ -1733,6 +1862,9 @@ const OptimizeTab = {
     document.getElementById(`${this.prefix}-btn-remove-interval-1`).addEventListener("click", () => this.removeInterval(0));
     document.getElementById(`${this.prefix}-btn-clear-1`).addEventListener("click", () => this.clearIntervals(0));
     
+    document.getElementById(`${this.prefix}-btn-play-1`).addEventListener("click", () => this.playChord(0));
+    document.getElementById(`${this.prefix}-btn-play-target-1`).addEventListener("click", () => this.playTarget(0));
+
     document.getElementById(`${this.prefix}-btn-calculate`).addEventListener("click", () => this.calculateGenerator());
   }
 };
